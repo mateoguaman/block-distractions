@@ -1,0 +1,16 @@
+[Unit]
+Description=Block Distractions Daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/bin/bash -c "cd {{SCRIPT_DIR}} && uv run ./block daemon"
+WorkingDirectory={{SCRIPT_DIR}}
+Restart=always
+RestartSec=10
+
+# Environment - include common uv install locations
+Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=default.target

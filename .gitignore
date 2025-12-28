@@ -1,0 +1,22 @@
+# Virtual environment
+.venv/
+
+# Logs
+.logs/
+daemon.log
+
+# Runtime state
+state.json
+
+# Python
+__pycache__/
+*.pyc
+
+# uv
+uv.lock
+
+# Claude Code
+.claude/
+
+# Test files
+etc_hosts_emergency_unlock

@@ -1,0 +1,11 @@
+[project]
+name = "block-distractions"
+version = "0.1.0"
+description = "Website blocking with proof-of-work and emergency unlocks"
+requires-python = ">=3.10"
+dependencies = [
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+block = "block:main"

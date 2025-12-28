@@ -1,0 +1,244 @@
+#!/usr/bin/env python3
+"""
+Block Distractions CLI
+
+A tool for blocking distracting websites with proof-of-work and emergency unlocks.
+
+Usage:
+    block status              Show current blocking status
+    block unlock              Unlock via proof-of-work (check Obsidian conditions)
+    block emergency           Emergency unlock with escalating wait times
+    block on                  Force enable blocking
+    block off                 Temporarily disable blocking (for testing)
+    block list                List blocked sites
+    block add <site>          Add a site to the blocklist
+    block remove <site>       Remove a site from the blocklist
+    block daemon              Run the background daemon
+    block check               Run a single daemon check cycle
+"""
+
+import sys
+import argparse
+from pathlib import Path
+
+# Add lib to path
+sys.path.insert(0, str(Path(__file__).parent))
+
+from lib.config import get_config
+from lib.state import get_state
+from lib.hosts import get_hosts_manager
+from lib.obsidian import get_obsidian_parser
+from lib.unlock import get_unlock_manager
+from lib.daemon import run_daemon, run_check_once
+
+
+def get_managers():
+    """Initialize and return all managers."""
+    config = get_config()
+    state = get_state()
+    hosts = get_hosts_manager()
+    obsidian = get_obsidian_parser(
+        config.obsidian_vault_path,
+        config.daily_note_pattern,
+    )
+    unlock = get_unlock_manager(config, state, hosts, obsidian)
+    return config, state, hosts, obsidian, unlock
+
+
+def cmd_status(args):
+    """Show current status."""
+    config, state, hosts, obsidian, unlock = get_managers()
+    status = unlock.get_status()
+
+    print("\n=== Block Distractions Status ===\n")
+
+    if status["blocked"]:
+        print("Status: BLOCKED")
+    else:
+        print(f"Status: UNLOCKED ({status['unlock_remaining']} remaining)")
+
+    print(f"\nEmergency unlocks used: {status['emergency_count']}/3")
+    print(f"Emergency unlocks remaining: {status['emergency_remaining']}")
+
+    print("\nConditions:")
+    for cond in status["conditions"]:
+        symbol = "[X]" if cond["met"] else "[ ]"
+        print(f"  {symbol} {cond['name']}: {cond['description']}")
+
+    print()
+
+
+def cmd_unlock(args):
+    """Attempt proof-of-work unlock."""
+    config, state, hosts, obsidian, unlock = get_managers()
+    success, message = unlock.proof_of_work_unlock()
+    print(message)
+    return 0 if success else 1
+
+
+def cmd_emergency(args):
+    """Emergency unlock with shame prompt."""
+    config, state, hosts, obsidian, unlock = get_managers()
+    success, message = unlock.emergency_unlock(interactive=True)
+    print(message)
+    return 0 if success else 1
+
+
+def cmd_on(args):
+    """Force enable blocking."""
+    config, state, hosts, obsidian, unlock = get_managers()
+    message = unlock.force_block()
+    print(message)
+
+
+def cmd_off(args):
+    """Temporarily disable blocking (for testing)."""
+    config, state, hosts, obsidian, unlock = get_managers()
+    # This is a testing/setup command - just unblock without conditions
+    state.set_unlocked(3600)  # 1 hour for testing
+    hosts.unblock_sites()
+    print("Blocking disabled for 1 hour (testing mode).")
+
+
+def cmd_list(args):
+    """List blocked sites."""
+    config = get_config()
+    sites = config.blocked_sites
+
+    print("\nBlocked sites:")
+    for site in sorted(sites):
+        print(f"  - {site}")
+    print(f"\nTotal: {len(sites)} sites")
+
+
+def cmd_add(args):
+    """Add a site to the blocklist."""
+    if not args.site:
+        print("Error: Please specify a site to add.")
+        return 1
+
+    config = get_config()
+
+    # Normalize site (remove protocol, www, trailing slash)
+    site = args.site.lower()
+    site = site.replace("https://", "").replace("http://", "")
+    site = site.replace("www.", "")
+    site = site.rstrip("/")
+
+    config.add_blocked_site(site)
+    print(f"Added '{site}' to blocklist.")
+
+    # Sync hosts file if blocking is active
+    state = get_state()
+    if state.is_blocked:
+        hosts = get_hosts_manager()
+        hosts.block_sites(config.blocked_sites)
+        print("Hosts file updated.")
+
+
+def cmd_remove(args):
+    """Remove a site from the blocklist."""
+    if not args.site:
+        print("Error: Please specify a site to remove.")
+        return 1
+
+    config = get_config()
+
+    site = args.site.lower()
+    site = site.replace("https://", "").replace("http://", "")
+    site = site.replace("www.", "")
+    site = site.rstrip("/")
+
+    if site not in config.blocked_sites:
+        print(f"Site '{site}' not in blocklist.")
+        return 1
+
+    config.remove_blocked_site(site)
+    print(f"Removed '{site}' from blocklist.")
+
+    # Sync hosts file
+    state = get_state()
+    if state.is_blocked:
+        hosts = get_hosts_manager()
+        hosts.block_sites(config.blocked_sites)
+        print("Hosts file updated.")
+
+
+def cmd_daemon(args):
+    """Run the background daemon."""
+    print("Starting background daemon...")
+    run_daemon()
+
+
+def cmd_check(args):
+    """Run a single check cycle."""
+    run_check_once()
+    print("Check complete.")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Block Distractions - Website blocking with proof-of-work unlocks"
+    )
+    subparsers = parser.add_subparsers(dest="command", help="Commands")
+
+    # Status command
+    subparsers.add_parser("status", help="Show current blocking status")
+
+    # Unlock command
+    subparsers.add_parser("unlock", help="Unlock via proof-of-work")
+
+    # Emergency command
+    subparsers.add_parser("emergency", help="Emergency unlock with wait time")
+
+    # On/Off commands
+    subparsers.add_parser("on", help="Force enable blocking")
+    subparsers.add_parser("off", help="Temporarily disable blocking")
+
+    # List command
+    subparsers.add_parser("list", help="List blocked sites")
+
+    # Add command
+    add_parser = subparsers.add_parser("add", help="Add a site to blocklist")
+    add_parser.add_argument("site", nargs="?", help="Site to add")
+
+    # Remove command
+    remove_parser = subparsers.add_parser("remove", help="Remove a site from blocklist")
+    remove_parser.add_argument("site", nargs="?", help="Site to remove")
+
+    # Daemon command
+    subparsers.add_parser("daemon", help="Run the background daemon")
+
+    # Check command
+    subparsers.add_parser("check", help="Run a single daemon check")
+
+    args = parser.parse_args()
+
+    if not args.command:
+        # Default to status
+        cmd_status(args)
+        return
+
+    commands = {
+        "status": cmd_status,
+        "unlock": cmd_unlock,
+        "emergency": cmd_emergency,
+        "on": cmd_on,
+        "off": cmd_off,
+        "list": cmd_list,
+        "add": cmd_add,
+        "remove": cmd_remove,
+        "daemon": cmd_daemon,
+        "check": cmd_check,
+    }
+
+    if args.command in commands:
+        result = commands[args.command](args)
+        if result:
+            sys.exit(result)
+    else:
+        parser.print_help()
+
+
+if __name__ == "__main__":
+    main()
