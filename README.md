@@ -102,7 +102,8 @@ The setup script automatically detects your OS and configures the appropriate da
 
 1. **Create a Google Cloud account** at https://cloud.google.com
    - Free $300 credit for 90 days
-   - After trial: ~$5/month for e2-micro instance
+   - **Always Free tier**: 1 e2-micro VM in us-west1/us-central1/us-east1 (if you follow this guide exactly, it's free forever)
+   - After trial (if outside free tier regions): ~$5/month for e2-micro instance
 
 2. **Install gcloud CLI:**
    ```bash
@@ -123,9 +124,14 @@ The setup script automatically detects your OS and configures the appropriate da
 3. **Create VM instance:**
    - Go to Compute Engine → VM instances → Create Instance
    - Name: `dns-server`
-   - Region: Choose one close to you (e.g., `us-west1-b`)
+   - Region: **MUST be one of these for free tier:**
+     - `us-west1` (Oregon)
+     - `us-central1` (Iowa)
+     - `us-east1` (South Carolina)
+     - Example: `us-west1-b` ✓ Free tier eligible
+     - ⚠️ Any other region (us-west2, europe, asia, etc.) will incur charges
    - Machine type: `e2-micro` (free tier eligible)
-   - Boot disk: Ubuntu 22.04 LTS, 10GB
+   - Boot disk: Ubuntu 22.04 LTS, 10GB (well under 30GB free tier limit)
    - Click Create
 
 4. **Note the External IP** (e.g., `34.127.22.131`)
