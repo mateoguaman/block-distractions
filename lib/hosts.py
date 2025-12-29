@@ -176,3 +176,77 @@ class HostsManager:
 def get_hosts_manager(hosts_path: Path | str | None = None) -> HostsManager:
     """Get a HostsManager instance."""
     return HostsManager(hosts_path)
+
+
+class RemoteSyncManager:
+    """Manages syncing hosts.block to a remote DNS server."""
+
+    def __init__(self, config: dict):
+        self.enabled = config.get("enabled", False)
+        self.host = config.get("host", "")
+        self.user = config.get("user", "")
+        self.remote_path = config.get("hosts_path", "/etc/hosts.block")
+
+    def sync(self, sites: list[str]) -> tuple[bool, str]:
+        """Sync blocked sites to remote server.
+
+        Returns:
+            Tuple of (success, message)
+        """
+        if not self.enabled:
+            return True, "Remote sync disabled"
+
+        if not self.host or not self.user:
+            return False, "Remote sync not configured (missing host or user)"
+
+        # Generate hosts.block content
+        lines = []
+        for site in sites:
+            lines.append(f"127.0.0.1 {site}")
+            if not site.startswith("www."):
+                lines.append(f"127.0.0.1 www.{site}")
+        content = "\n".join(lines) + "\n" if lines else ""
+
+        try:
+            # Write to temp file
+            with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".hosts") as f:
+                f.write(content)
+                temp_path = f.name
+
+            # Copy to remote server
+            remote = f"{self.user}@{self.host}"
+            result = subprocess.run(
+                ["scp", temp_path, f"{remote}:/tmp/hosts.block.tmp"],
+                capture_output=True,
+                text=True,
+            )
+
+            if result.returncode != 0:
+                return False, f"Failed to copy to remote: {result.stderr}"
+
+            # Move to final location, fix permissions, and reload dnsmasq
+            result = subprocess.run(
+                ["ssh", remote,
+                 "sudo mv /tmp/hosts.block.tmp /etc/hosts.block && "
+                 "sudo chmod 644 /etc/hosts.block && "
+                 "sudo chown root:root /etc/hosts.block && "
+                 "sudo killall -HUP dnsmasq"],
+                capture_output=True,
+                text=True,
+            )
+
+            # Clean up temp file
+            Path(temp_path).unlink(missing_ok=True)
+
+            if result.returncode != 0:
+                return False, f"Failed to update remote: {result.stderr}"
+
+            return True, f"Synced {len(sites)} sites to {self.host}"
+
+        except Exception as e:
+            return False, f"Sync error: {e}"
+
+
+def get_remote_sync_manager(config: dict) -> RemoteSyncManager:
+    """Get a RemoteSyncManager instance."""
+    return RemoteSyncManager(config)

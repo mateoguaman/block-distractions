@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>PayloadContent</key>
+    <array>
+        <!-- CA Certificate Payload -->
+        <dict>
+            <key>PayloadCertificateFileName</key>
+            <string>BlockDistractionsCA.crt</string>
+            <key>PayloadContent</key>
+            <data>LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURXekNDQWtPZ0F3SUJBZ0lVVmZvV3F3UjBWK0k2dVBQT2R2eTlJVVQ4eDY4d0RRWUpLb1pJaHZjTkFRRUwKQlFBd1BURWVNQndHQTFVRUF3d1ZRbXh2WTJzZ1JHbHpkSEpoWTNScGIyNXpJRU5CTVJzd0dRWURWUVFLREJKQwpiRzlqYXlCRWFYTjBjbUZqZEdsdmJuTXdIaGNOTWpVeE1qSTVNRFF6TkRFMldoY05NelV4TWpJM01EUXpOREUyCldqQTlNUjR3SEFZRFZRUUREQlZDYkc5amF5QkVhWE4wY21GamRHbHZibk1nUTBFeEd6QVpCZ05WQkFvTUVrSnMKYjJOcklFUnBjM1J5WVdOMGFXOXVjekNDQVNJd0RRWUpLb1pJaHZjTkFRRUJCUUFEZ2dFUEFEQ0NBUW9DZ2dFQgpBTWlEMzdDQks5TXB5a3lDN25zeG90QkFDVmJYQlEyM1Jpb1hTOFR0YmZGQWErZUV6dUF3N3M4ZXA2NTNFWUpXCndXdFNzQUVqelRNM2MwRTgyNTd5SWNpYjJ2YmxVa2pxRFhMY3h6V2dwcm5jTWRDb1ErS0llNzg2NHl1OTNQeHMKOUJZd2NqY0ZjczFkWVoyZ2RmVGxDTGwzWEtCc0tBQlVudDVuR0pyVVFLNk5EVWFUU0x3dWc3ajRzUkUwYzhBWgpuODZuODhhUC95R3EzcTJDQ3ZKdk8zRGxDZnErQ2hvZDFJZjNYaURlUjdLUUcvZnpvWUREc01vM0ExMzlNNXRjCjVZN2l3WkZJKzNmTWFzQU1DYUUzSHI4ZU05Z1FESWppblJadng0bU5SaEk2bWpSaFVyc1NXWC91K0tuUWRVUEMKT0hKM3RYY1YwUndOVmZ3TFNoLzRBZnNDQXdFQUFhTlRNRkV3SFFZRFZSME9CQllFRkFvTWdkQjZrVFpockdhegp0anhLVVltVVNTckRNQjhHQTFVZEl3UVlNQmFBRkFvTWdkQjZrVFpockdhenRqeEtVWW1VU1NyRE1BOEdBMVVkCkV3RUIvd1FGTUFNQkFmOHdEUVlKS29aSWh2Y05BUUVMQlFBRGdnRUJBSVozdnlrbEhlS3ROZjRZVnRxbXAySmwKay9vbWZHUmpGS1VRM2RrZkxKT25LSGJPQzV1blYrd3p4NE90YUhoRm9qRjNaVGxEVXAzcG1Zc0VDaSs2R3RkdQo5TTZmOVNQUllYZjYvSUw5NzBJd0JaMklsZnRJaG5KRnVHaHpvMnhXbDRWdFd2czIwaUlNSjRpWldIYWN0NGZoCmVtMzE4UGJQUllwUFFHSHd0NjlsZTE0L0VMNFFNRllvUGptVDVuR3RYRWhRY0hoemlkQU42UTRCOFhpcS9kS2sKZ0hpQWpzRXJwNkI5L1FPd0grRWd0aUJjS2NwRjFaMjlEbEVVaGNSNVZDSVE2akI5ZkZ1MXVVeWR4bEdlYVhaNwo4QmZBVW9Lc0RyWGlMRmxKR3BRaVYvNm80b210OC9BQTdJT05Yc0pCTVZ6S3ZnR0xUMmN3SHdrWnh0U01jMXM9Ci0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K</data>
+            <key>PayloadDisplayName</key>
+            <string>Block Distractions CA</string>
+            <key>PayloadIdentifier</key>
+            <string>com.blockdistractions.ca</string>
+            <key>PayloadType</key>
+            <string>com.apple.security.root</string>
+            <key>PayloadUUID</key>
+            <string>C3D4E5F6-A7B8-9012-CDEF-123456789012</string>
+            <key>PayloadVersion</key>
+            <integer>1</integer>
+        </dict>
+        <!-- DNS Settings Payload -->
+        <dict>
+            <key>DNSSettings</key>
+            <dict>
+                <key>DNSProtocol</key>
+                <string>TLS</string>
+                <key>ServerAddresses</key>
+                <array>
+                    <string>34.127.22.131</string>
+                </array>
+                <key>ServerName</key>
+                <string>34.127.22.131</string>
+            </dict>
+            <key>OnDemandRules</key>
+            <array>
+                <dict>
+                    <key>Action</key>
+                    <string>Connect</string>
+                </dict>
+            </array>
+            <key>PayloadDisplayName</key>
+            <string>Block Distractions DNS</string>
+            <key>PayloadIdentifier</key>
+            <string>com.blockdistractions.dns.settings</string>
+            <key>PayloadType</key>
+            <string>com.apple.dnsSettings.managed</string>
+            <key>PayloadUUID</key>
+            <string>B2C3D4E5-F6A7-8901-BCDE-F12345678901</string>
+            <key>PayloadVersion</key>
+            <integer>1</integer>
+        </dict>
+    </array>
+    <key>PayloadDescription</key>
+    <string>Configures DNS over TLS to use Block Distractions server for website blocking</string>
+    <key>PayloadDisplayName</key>
+    <string>Block Distractions</string>
+    <key>PayloadIdentifier</key>
+    <string>com.blockdistractions.profile</string>
+    <key>PayloadOrganization</key>
+    <string>Block Distractions</string>
+    <key>PayloadRemovalDisallowed</key>
+    <false/>
+    <key>PayloadType</key>
+    <string>Configuration</string>
+    <key>PayloadUUID</key>
+    <string>A1B2C3D4-E5F6-7890-ABCD-EF1234567890</string>
+    <key>PayloadVersion</key>
+    <integer>1</integer>
+</dict>
+</plist>

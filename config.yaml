@@ -1,6 +1,12 @@
 obsidian:
   vault_path: /Users/mateo/Documents/mateo-md
   daily_note_pattern: Daily/{date}.md
+# Remote DNS sync (uncomment to enable iPhone blocking)
+# remote_sync:
+#   enabled: true
+#   host: YOUR_VM_IP          # e.g., 34.127.22.131
+#   user: YOUR_SSH_USERNAME
+#   hosts_path: /etc/hosts.block
 conditions:
   workout:
     type: checkbox

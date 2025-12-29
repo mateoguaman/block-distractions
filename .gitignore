@@ -20,3 +20,6 @@ uv.lock
 
 # Test files
 etc_hosts_emergency_unlock
+
+# TLS certificates (contain private keys)
+certs/

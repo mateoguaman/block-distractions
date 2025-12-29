@@ -156,6 +156,11 @@ class Config:
         """Get auto-unlock settings."""
         return self.get("auto_unlock", {})
 
+    @property
+    def remote_sync_settings(self) -> dict[str, Any]:
+        """Get remote sync settings."""
+        return self.get("remote_sync", {})
+
     def add_blocked_site(self, site: str) -> None:
         """Add a site to the blocklist."""
         sites = self.blocked_sites

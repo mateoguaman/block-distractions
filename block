@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from lib.config import get_config
 from lib.state import get_state
-from lib.hosts import get_hosts_manager
+from lib.hosts import get_hosts_manager, get_remote_sync_manager
 from lib.obsidian import get_obsidian_parser
 from lib.unlock import get_unlock_manager
 from lib.daemon import run_daemon, run_check_once
@@ -111,6 +111,16 @@ def cmd_list(args):
     print(f"\nTotal: {len(sites)} sites")
 
 
+def cmd_sync(args):
+    """Sync blocklist to remote DNS server."""
+    config = get_config()
+    remote_sync = get_remote_sync_manager(config.remote_sync_settings)
+
+    success, message = remote_sync.sync(config.blocked_sites)
+    print(message)
+    return 0 if success else 1
+
+
 def cmd_add(args):
     """Add a site to the blocklist."""
     if not args.site:
@@ -134,6 +144,11 @@ def cmd_add(args):
         hosts = get_hosts_manager()
         hosts.block_sites(config.blocked_sites)
         print("Hosts file updated.")
+
+    # Sync to remote
+    remote_sync = get_remote_sync_manager(config.remote_sync_settings)
+    success, message = remote_sync.sync(config.blocked_sites)
+    print(f"Remote: {message}")
 
 
 def cmd_remove(args):
@@ -162,6 +177,11 @@ def cmd_remove(args):
         hosts = get_hosts_manager()
         hosts.block_sites(config.blocked_sites)
         print("Hosts file updated.")
+
+    # Sync to remote
+    remote_sync = get_remote_sync_manager(config.remote_sync_settings)
+    success, message = remote_sync.sync(config.blocked_sites)
+    print(f"Remote: {message}")
 
 
 def cmd_daemon(args):
@@ -212,6 +232,9 @@ def main():
     # Check command
     subparsers.add_parser("check", help="Run a single daemon check")
 
+    # Sync command
+    subparsers.add_parser("sync", help="Sync blocklist to remote DNS server")
+
     args = parser.parse_args()
 
     if not args.command:
@@ -230,6 +253,7 @@ def main():
         "remove": cmd_remove,
         "daemon": cmd_daemon,
         "check": cmd_check,
+        "sync": cmd_sync,
     }
 
     if args.command in commands:
