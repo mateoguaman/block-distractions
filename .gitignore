@@ -1,3 +1,7 @@
+# Secrets (contains personal paths, IPs, usernames)
+config.secrets.yaml
+dns-blocker.mobileconfig
+
 # Virtual environment
 .venv/
 

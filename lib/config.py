@@ -5,8 +5,9 @@ import yaml
 from pathlib import Path
 from typing import Any
 
-# Default configuration location
+# Default configuration locations
 DEFAULT_CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
+DEFAULT_SECRETS_PATH = Path(__file__).parent.parent / "config.secrets.yaml"
 
 # Default configuration values
 DEFAULT_CONFIG = {
@@ -78,13 +79,21 @@ class Config:
         self.load()
 
     def load(self) -> None:
-        """Load configuration from file, merging with defaults."""
+        """Load configuration from file, merging with defaults and secrets."""
         self._config = DEFAULT_CONFIG.copy()
 
+        # Load main config
         if self.config_path.exists():
             with open(self.config_path, "r") as f:
                 user_config = yaml.safe_load(f) or {}
             self._deep_merge(self._config, user_config)
+
+        # Load secrets (contains personal paths, IPs, usernames)
+        secrets_path = self.config_path.parent / "config.secrets.yaml"
+        if secrets_path.exists():
+            with open(secrets_path, "r") as f:
+                secrets_config = yaml.safe_load(f) or {}
+            self._deep_merge(self._config, secrets_config)
 
         # Expand paths
         if "obsidian" in self._config:

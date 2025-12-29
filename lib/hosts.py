@@ -65,8 +65,9 @@ class HostsManager:
                     ["sudo", "dscacheutil", "-flushcache"],
                     capture_output=True,
                 )
+                # Use -9 to force restart mDNSResponder (HUP doesn't always reload hosts)
                 subprocess.run(
-                    ["sudo", "killall", "-HUP", "mDNSResponder"],
+                    ["sudo", "killall", "-9", "mDNSResponder"],
                     capture_output=True,
                 )
             elif system == "Linux":
@@ -82,10 +83,13 @@ class HostsManager:
         """Generate hosts file entries for blocking sites."""
         lines = [BEGIN_MARKER]
         for site in sites:
-            # Add both bare domain and www subdomain
+            # Add both IPv4 and IPv6 blocking for each domain
+            # IPv6 is needed because some sites have AAAA records and Safari prefers IPv6
             lines.append(f"{BLOCK_IP} {site}")
+            lines.append(f"::1 {site}")
             if not site.startswith("www."):
                 lines.append(f"{BLOCK_IP} www.{site}")
+                lines.append(f"::1 www.{site}")
         lines.append(END_MARKER)
         return "\n".join(lines)
 
@@ -140,19 +144,19 @@ class HostsManager:
 
     def block_sites(self, sites: list[str]) -> bool:
         """Block the given sites in the hosts file."""
-        content = self._read_hosts()
+        current_content = self._read_hosts()
 
-        # Remove existing block section
-        content = self._remove_block_section(content)
+        # Build new content
+        base_content = self._remove_block_section(current_content)
+        if base_content and not base_content.endswith("\n"):
+            base_content += "\n"
+        new_content = base_content + "\n" + self._get_block_entries(sites) + "\n"
 
-        # Ensure content ends with newline
-        if content and not content.endswith("\n"):
-            content += "\n"
+        # Only write if content actually changed (avoid unnecessary DNS flushes)
+        if new_content.strip() == current_content.strip():
+            return True  # Already up to date
 
-        # Add new block section
-        content += "\n" + self._get_block_entries(sites) + "\n"
-
-        return self._write_hosts(content)
+        return self._write_hosts(new_content)
 
     def unblock_sites(self) -> bool:
         """Remove all site blocks from hosts file."""
@@ -179,13 +183,18 @@ def get_hosts_manager(hosts_path: Path | str | None = None) -> HostsManager:
 
 
 class RemoteSyncManager:
-    """Manages syncing hosts.block to a remote DNS server."""
+    """Manages syncing blocklist to a remote dnsmasq server.
+
+    Uses dnsmasq address=// format which blocks ALL DNS record types
+    (A, AAAA, HTTPS, SVCB, etc.) to prevent Safari's HTTPS record bypass.
+    """
 
     def __init__(self, config: dict):
         self.enabled = config.get("enabled", False)
         self.host = config.get("host", "")
         self.user = config.get("user", "")
-        self.remote_path = config.get("hosts_path", "/etc/hosts.block")
+        # Default to new dnsmasq.d location for address= format
+        self.remote_path = config.get("blocklist_path", "/etc/dnsmasq.d/blocklist.conf")
 
     def sync(self, sites: list[str]) -> tuple[bool, str]:
         """Sync blocked sites to remote server.
@@ -199,24 +208,26 @@ class RemoteSyncManager:
         if not self.host or not self.user:
             return False, "Remote sync not configured (missing host or user)"
 
-        # Generate hosts.block content
+        # Generate dnsmasq address= format
+        # This blocks ALL record types (A, AAAA, HTTPS, SVCB, etc.)
+        # which prevents Safari's HTTPS record IP hint bypass
         lines = []
         for site in sites:
-            lines.append(f"127.0.0.1 {site}")
+            lines.append(f"address=/{site}/")
             if not site.startswith("www."):
-                lines.append(f"127.0.0.1 www.{site}")
-        content = "\n".join(lines) + "\n" if lines else ""
+                lines.append(f"address=/www.{site}/")
+        content = "\n".join(sorted(set(lines))) + "\n" if lines else ""
 
         try:
             # Write to temp file
-            with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".hosts") as f:
+            with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".conf") as f:
                 f.write(content)
                 temp_path = f.name
 
             # Copy to remote server
             remote = f"{self.user}@{self.host}"
             result = subprocess.run(
-                ["scp", temp_path, f"{remote}:/tmp/hosts.block.tmp"],
+                ["scp", temp_path, f"{remote}:/tmp/blocklist.conf.tmp"],
                 capture_output=True,
                 text=True,
             )
@@ -224,13 +235,13 @@ class RemoteSyncManager:
             if result.returncode != 0:
                 return False, f"Failed to copy to remote: {result.stderr}"
 
-            # Move to final location, fix permissions, and reload dnsmasq
+            # Move to final location, fix permissions, and restart dnsmasq
             result = subprocess.run(
                 ["ssh", remote,
-                 "sudo mv /tmp/hosts.block.tmp /etc/hosts.block && "
-                 "sudo chmod 644 /etc/hosts.block && "
-                 "sudo chown root:root /etc/hosts.block && "
-                 "sudo killall -HUP dnsmasq"],
+                 f"sudo mv /tmp/blocklist.conf.tmp {self.remote_path} && "
+                 f"sudo chmod 644 {self.remote_path} && "
+                 f"sudo chown root:root {self.remote_path} && "
+                 "sudo systemctl restart dnsmasq"],
                 capture_output=True,
                 text=True,
             )

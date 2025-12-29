@@ -1,37 +1,374 @@
 # Block Distractions
 
-A CLI tool that blocks distracting websites via `/etc/hosts` with proof-of-work and emergency unlock mechanisms.
+A CLI tool that blocks distracting websites with proof-of-work and emergency unlock mechanisms. Supports blocking on Mac, iPhone, and other devices via a remote DNS server.
 
 ## Features
 
-- **System-level blocking** via `/etc/hosts` (blocks sites in all browsers)
+- **Cross-device blocking** via remote DNS server (Mac, iPhone, any device)
 - **Proof-of-work unlock** - Earn access by completing conditions tracked in Obsidian
 - **Emergency unlock** - Limited bypass with escalating wait times and shame prompts
 - **Background daemon** - Automatically checks conditions and unlocks when earned
-- **Cross-platform** - Works on macOS (launchd) and Linux (systemd)
+- **Safari-proof blocking** - Uses DNS-level blocking that Safari cannot bypass
+
+## Architecture
+
+```
+┌─────────────────┐         ┌─────────────────┐
+│   Mac           │         │   iPhone        │
+│   Safari ───────┤         │   Safari ───────┤
+│   Chrome ───────┤         │                 │
+│   All apps ─────┤         └────────┬────────┘
+└────────┬────────┘                  │
+         │                           │
+         │ DNS queries               │ DNS-over-TLS
+         │ (port 53)                 │ (port 853)
+         └───────────┬───────────────┘
+                     ▼
+            ┌─────────────────────┐
+            │ Google Cloud VM     │
+            │ dnsmasq             │
+            │                     │
+            │ Blocks ALL DNS      │
+            │ record types        │
+            │ (A, AAAA, HTTPS)    │
+            └─────────────────────┘
+```
+
+## Why DNS-Level Blocking?
+
+### The Problem with /etc/hosts
+
+Traditional `/etc/hosts` blocking only works for A (IPv4) and AAAA (IPv6) DNS records. Modern browsers, especially **Safari on macOS and iOS**, query **HTTPS DNS records (RFC 9460)** which contain IP address hints directly in the DNS response:
+
+```
+$ dig people.com HTTPS +short
+1 . alpn="h3,h2" ipv4hint=162.159.141.224 ipv6hint=2606:4700:7::1d8
+```
+
+Safari uses these embedded IP hints to connect directly, completely bypassing `/etc/hosts`. This is why some sites load in Safari even when blocked in the hosts file.
+
+### The Solution
+
+We use **dnsmasq** with `address=/domain/` directives, which block **ALL** DNS record types for a domain (A, AAAA, HTTPS, SVCB, etc.). The dnsmasq server runs on a cloud VM, and all devices point their DNS to this server.
 
 ## Requirements
 
 - Python 3.10+
 - [uv](https://github.com/astral-sh/uv) - Python package manager
 - Obsidian (for condition tracking)
+- Google Cloud account (for remote DNS server)
+- [gcloud CLI](https://cloud.google.com/sdk/docs/install) (for VM management)
 
-## Installation
+## Quick Start
+
+If you already have a VM set up, just configure your devices:
+
+**Mac:**
+```bash
+sudo networksetup -setdnsservers Wi-Fi YOUR_VM_IP
+```
+
+**iPhone:** Install the DNS profile (see [iPhone Setup](#iphone-dns-configuration))
+
+---
+
+## Full Setup Guide
+
+### Part 1: Local Setup (Mac)
 
 ```bash
-# Clone/download the repo, then:
+# Clone the repo
+git clone https://github.com/YOUR_USERNAME/block_distractions.git
 cd block_distractions
 
-# Run setup (requires sudo for /etc/hosts access)
+# Create your secrets file from the template
+cp config.secrets.example.yaml config.secrets.yaml
+
+# Run setup (installs dependencies, creates block command)
 ./setup.sh
 ```
 
-This will:
-1. Create a Python virtual environment and install dependencies
-2. Install the `block` command to `/usr/local/bin`
-3. Configure passwordless sudo for `/etc/hosts` modifications (see [Security](#passwordless-sudo))
-4. Set up and start the background daemon
-5. Enable initial blocking
+**Important:** The `config.secrets.yaml` file contains your personal settings (Obsidian vault path, VM IP, SSH username) and is git-ignored. You'll fill in the values as you complete the setup.
+
+### Part 2: Create Google Cloud VM
+
+1. **Create a Google Cloud account** at https://cloud.google.com
+   - Free $300 credit for 90 days
+   - After trial: ~$5/month for e2-micro instance
+
+2. **Install gcloud CLI:**
+   ```bash
+   # macOS
+   brew install google-cloud-sdk
+
+   # Then authenticate
+   gcloud auth login
+   gcloud config set project YOUR_PROJECT_ID
+   ```
+
+3. **Create VM instance:**
+   - Go to Compute Engine → VM instances → Create Instance
+   - Name: `dns-server`
+   - Region: Choose one close to you (e.g., `us-west1-b`)
+   - Machine type: `e2-micro` (free tier eligible)
+   - Boot disk: Ubuntu 22.04 LTS, 10GB
+   - Click Create
+
+4. **Note the External IP** (e.g., `34.127.22.131`)
+
+5. **Open firewall ports:**
+   - Go to VPC Network → Firewall → Create Firewall Rule
+   - Create two rules:
+
+   | Name | Direction | Targets | Source | Protocols |
+   |------|-----------|---------|--------|-----------|
+   | `allow-dns` | Ingress | All instances | `0.0.0.0/0` | `tcp:53`, `udp:53` |
+   | `allow-dns-tls` | Ingress | All instances | `0.0.0.0/0` | `tcp:853` |
+
+### Part 3: Configure dnsmasq on VM
+
+SSH into your VM:
+```bash
+gcloud compute ssh dns-server --zone=YOUR_ZONE
+```
+
+Run these commands on the VM:
+
+```bash
+# Install dnsmasq
+sudo apt-get update
+sudo apt-get install -y dnsmasq
+
+# Disable systemd-resolved (conflicts with dnsmasq on port 53)
+sudo sed -i 's/#DNSStubListener=yes/DNSStubListener=no/' /etc/systemd/resolved.conf
+sudo systemctl restart systemd-resolved
+
+# Remove --local-service flag (allows external DNS queries)
+sudo sed -i 's/DNSMASQ_OPTS="${DNSMASQ_OPTS} --local-service"/#DNSMASQ_OPTS="${DNSMASQ_OPTS} --local-service"/' /etc/init.d/dnsmasq
+
+# Configure dnsmasq
+sudo tee /etc/dnsmasq.conf << 'EOF'
+# Forward to upstream DNS
+no-resolv
+server=8.8.8.8
+server=8.8.4.4
+
+# Logging (optional - comment out for production)
+log-queries
+
+# Cache
+cache-size=1000
+
+# Include blocklist (uses address=// format to block ALL record types)
+conf-dir=/etc/dnsmasq.d/,*.conf
+EOF
+
+# Create blocklist directory and empty blocklist
+sudo mkdir -p /etc/dnsmasq.d
+sudo touch /etc/dnsmasq.d/blocklist.conf
+
+# Restart dnsmasq
+sudo systemctl restart dnsmasq
+sudo systemctl enable dnsmasq
+
+# Verify it's running
+sudo systemctl status dnsmasq
+```
+
+### Part 4: Set Up SSH Access
+
+The `block sync` command uses SSH to upload the blocklist. Set up SSH access:
+
+**On your Mac:**
+```bash
+# This creates SSH keys and adds them to the VM automatically
+gcloud compute ssh dns-server --zone=YOUR_ZONE --command="echo 'SSH works'"
+```
+
+**Find your SSH username:**
+```bash
+gcloud compute ssh dns-server --zone=YOUR_ZONE --command="whoami"
+# This will output your username (e.g., "mateo")
+```
+
+**Add SSH config for easier access:**
+```bash
+cat >> ~/.ssh/config << EOF
+
+# Block Distractions DNS Server
+Host YOUR_VM_IP
+    User YOUR_USERNAME
+    IdentityFile ~/.ssh/google_compute_engine
+EOF
+```
+
+**Test direct SSH:**
+```bash
+ssh YOUR_USERNAME@YOUR_VM_IP "echo 'Direct SSH works'"
+```
+
+### Part 5: Configure Passwordless Sudo on VM
+
+The sync command needs sudo access on the VM. SSH into the VM and run:
+
+```bash
+sudo tee /etc/sudoers.d/block-sync << 'EOF'
+YOUR_USERNAME ALL=(ALL) NOPASSWD: /bin/mv /tmp/blocklist.conf.tmp /etc/dnsmasq.d/blocklist.conf
+YOUR_USERNAME ALL=(ALL) NOPASSWD: /bin/chmod 644 /etc/dnsmasq.d/blocklist.conf
+YOUR_USERNAME ALL=(ALL) NOPASSWD: /bin/chown root\:root /etc/dnsmasq.d/blocklist.conf
+YOUR_USERNAME ALL=(ALL) NOPASSWD: /bin/systemctl restart dnsmasq
+EOF
+
+sudo chmod 440 /etc/sudoers.d/block-sync
+```
+
+### Part 6: Configure Block Distractions
+
+Edit `config.secrets.yaml` on your Mac with your personal settings:
+
+```yaml
+obsidian:
+  vault_path: /full/path/to/your/obsidian/vault
+
+remote_sync:
+  host: YOUR_VM_IP           # e.g., 34.127.22.131
+  user: YOUR_USERNAME        # e.g., mateo (from gcloud whoami)
+```
+
+The non-sensitive settings (blocklist, conditions, unlock timing) are in `config.yaml` which is version-controlled.
+
+**Test the sync:**
+```bash
+block sync
+# Should output: "Synced X sites to YOUR_VM_IP"
+```
+
+**Verify blocking on VM:**
+```bash
+dig @YOUR_VM_IP twitter.com A +short
+# Should return nothing (blocked)
+
+dig @YOUR_VM_IP twitter.com HTTPS +short
+# Should return nothing (blocked)
+
+dig @YOUR_VM_IP google.com A +short
+# Should return real IP (not blocked)
+```
+
+### Part 7: Point Mac DNS to VM
+
+```bash
+sudo networksetup -setdnsservers Wi-Fi YOUR_VM_IP
+```
+
+**Test in Safari:** Try loading a blocked site - it should fail.
+
+**To revert (use router's DNS):**
+```bash
+sudo networksetup -setdnsservers Wi-Fi empty
+```
+
+---
+
+## iPhone DNS Configuration
+
+iOS requires **encrypted DNS** (DNS-over-TLS) for system-wide configuration. This requires a valid TLS certificate.
+
+### Step 1: Get a Domain with Let's Encrypt Certificate
+
+**Create DuckDNS subdomain (free):**
+1. Go to https://www.duckdns.org/ and sign in
+2. Create a subdomain (e.g., `myblock` → `myblock.duckdns.org`)
+3. Set the IP to your VM's external IP
+4. Copy your **token**
+
+**Get Let's Encrypt certificate on VM:**
+```bash
+# Install certbot with DuckDNS plugin
+sudo apt-get install -y certbot python3-pip
+sudo pip3 install certbot-dns-duckdns
+
+# Create credentials file
+echo "dns_duckdns_token = YOUR_TOKEN" | sudo tee /etc/letsencrypt/duckdns.ini
+sudo chmod 600 /etc/letsencrypt/duckdns.ini
+
+# Get certificate
+sudo certbot certonly \
+  --non-interactive \
+  --agree-tos \
+  --email your-email@example.com \
+  --preferred-challenges dns \
+  --authenticator dns-duckdns \
+  --dns-duckdns-credentials /etc/letsencrypt/duckdns.ini \
+  --dns-duckdns-propagation-seconds 60 \
+  -d YOUR_SUBDOMAIN.duckdns.org
+```
+
+### Step 2: Set Up stunnel for DNS-over-TLS
+
+```bash
+# Install stunnel
+sudo apt-get install -y stunnel4
+
+# Create combined certificate
+sudo bash -c 'cat /etc/letsencrypt/live/YOUR_SUBDOMAIN.duckdns.org/fullchain.pem \
+              /etc/letsencrypt/live/YOUR_SUBDOMAIN.duckdns.org/privkey.pem \
+              > /etc/stunnel/server.pem'
+sudo chown stunnel4:stunnel4 /etc/stunnel/server.pem
+sudo chmod 600 /etc/stunnel/server.pem
+
+# Configure stunnel
+sudo tee /etc/stunnel/dns-tls.conf << 'EOF'
+pid = /var/run/stunnel4/dns-tls.pid
+setuid = stunnel4
+setgid = stunnel4
+
+[dns-tls]
+accept = 853
+connect = 127.0.0.1:53
+cert = /etc/stunnel/server.pem
+EOF
+
+# Create pid directory
+sudo mkdir -p /var/run/stunnel4
+sudo chown stunnel4:stunnel4 /var/run/stunnel4
+
+# Enable and start stunnel
+sudo sed -i 's/ENABLED=0/ENABLED=1/' /etc/default/stunnel4
+sudo systemctl restart stunnel4
+sudo systemctl enable stunnel4
+```
+
+### Step 3: Create iOS Configuration Profile
+
+Create your profile from the template:
+```bash
+cp dns-blocker.mobileconfig.example dns-blocker.mobileconfig
+```
+
+Edit `dns-blocker.mobileconfig` and replace the placeholders:
+```xml
+<key>ServerAddresses</key>
+<array>
+    <string>YOUR_VM_IP</string>          <!-- Replace with your VM's IP -->
+</array>
+<key>ServerName</key>
+<string>YOUR_SUBDOMAIN.duckdns.org</string>  <!-- Replace with your DuckDNS domain -->
+```
+
+### Step 4: Install on iPhone
+
+1. Transfer `dns-blocker.mobileconfig` to iPhone (AirDrop or email)
+2. Settings → General → VPN & Device Management → Install profile
+3. The profile will be "Not Verified" but this is normal for self-created profiles
+
+### Step 5: Verify iPhone Blocking
+
+1. Clear Safari cache: Settings → Safari → Clear History and Website Data
+2. Try loading a blocked site in Safari
+3. It should fail to load
+
+---
 
 ## Usage
 
@@ -42,8 +379,9 @@ block emergency           # Emergency unlock with escalating waits
 block on                  # Force enable blocking
 block off                 # Temporarily disable (testing only)
 block list                # List blocked sites
-block add <site>          # Add a site to blocklist
-block remove <site>       # Remove a site from blocklist
+block add <site>          # Add a site to blocklist (syncs to VM)
+block remove <site>       # Remove a site from blocklist (syncs to VM)
+block sync                # Manually sync blocklist to VM
 block daemon              # Run background daemon (usually auto-started)
 block check               # Run a single condition check
 ```
@@ -56,7 +394,7 @@ Edit `config.yaml` to customize:
 
 ```yaml
 obsidian:
-  vault_path: "~/Documents/mateo-md"
+  vault_path: "~/Documents/your-vault"
   daily_note_pattern: "Daily/{date}.md"  # {date} = YYYY-MM-DD
 ```
 
@@ -66,17 +404,15 @@ Any ONE condition being met allows proof-of-work unlock:
 
 ```yaml
 conditions:
-  # Checkbox condition
   workout:
     type: checkbox
-    pattern: "- [x] Workout"  # Matches checked checkbox
+    pattern: "- [x] Workout"
 
-  # Word count from linked files
   writing:
     type: linked_wordcount
-    section: "Writing"        # Heading to look under
-    section_any_level: true   # Match #, ##, ###, etc.
-    minimum: 500              # Minimum words required
+    section: "Writing"
+    section_any_level: true
+    minimum: 500
 ```
 
 **Condition types:**
@@ -109,15 +445,132 @@ blocked_sites:
   - twitter.com
   - youtube.com
   - reddit.com
-  # ... add more as needed
+  # Add more as needed
 ```
+
+### Remote Sync
+
+```yaml
+remote_sync:
+  enabled: true
+  host: 34.127.22.131              # Your VM's external IP
+  user: mateo                       # SSH username (from gcloud whoami)
+  blocklist_path: /etc/dnsmasq.d/blocklist.conf
+```
+
+---
 
 ## How It Works
 
-1. **Blocking**: Sites are added to `/etc/hosts` pointing to `127.0.0.1`
-2. **Proof-of-work**: Check your Obsidian daily note for completed conditions
-3. **Emergency**: Escalating wait times (30s → 60s → 120s) + type "I CHOOSE DISTRACTION"
-4. **Daemon**: Runs in background, auto-unlocks after `earliest_time` if conditions met
+1. **Blocking**: `block add` adds sites to `config.yaml` and syncs to VM's dnsmasq
+2. **DNS Resolution**: All devices query the VM, which returns NXDOMAIN for blocked domains
+3. **Proof-of-work**: Check Obsidian daily note for completed conditions to unlock
+4. **Emergency**: Escalating wait times (30s → 60s → 120s) + type "I CHOOSE DISTRACTION"
+5. **Daemon**: Runs in background, auto-unlocks after `earliest_time` if conditions met
+
+---
+
+## Gotchas and Troubleshooting
+
+### Safari still loads blocked sites
+
+**Cause:** Safari is using cached DNS or the DNS change hasn't propagated.
+
+**Fix:**
+```bash
+# Flush DNS cache
+sudo dscacheutil -flushcache && sudo killall -9 mDNSResponder
+
+# Clear Safari cache
+# Safari → Settings → Privacy → Manage Website Data → Remove All
+
+# Verify DNS is pointing to VM
+scutil --dns | grep nameserver
+# Should show your VM IP
+```
+
+### iPhone blocking not working for some sites
+
+**Cause:** HTTPS DNS records were not being blocked (old hosts-file format).
+
+**Fix:** Ensure VM uses `address=/domain/` format (not `addn-hosts`):
+```bash
+# On VM - check blocklist format
+cat /etc/dnsmasq.d/blocklist.conf
+# Should show: address=/twitter.com/
+
+# If it shows "127.0.0.1 twitter.com", re-sync:
+block sync
+```
+
+### SSH permission denied
+
+**Cause:** SSH key not set up for direct access.
+
+**Fix:**
+```bash
+# Use gcloud to set up SSH keys automatically
+gcloud compute ssh dns-server --zone=YOUR_ZONE --command="whoami"
+
+# Add to SSH config
+cat >> ~/.ssh/config << EOF
+Host YOUR_VM_IP
+    User YOUR_USERNAME
+    IdentityFile ~/.ssh/google_compute_engine
+EOF
+```
+
+### "block sync" fails with sudo error
+
+**Cause:** Passwordless sudo not configured on VM.
+
+**Fix:** On the VM, create `/etc/sudoers.d/block-sync` (see [Part 5](#part-5-configure-passwordless-sudo-on-vm)).
+
+### DNS not working at all (can't load any sites)
+
+**Cause:** VM is down, dnsmasq crashed, or firewall blocking.
+
+**Fix:**
+```bash
+# Check VM status
+gcloud compute instances list
+
+# Check dnsmasq on VM
+gcloud compute ssh dns-server --zone=YOUR_ZONE --command="sudo systemctl status dnsmasq"
+
+# Temporarily revert to automatic DNS
+sudo networksetup -setdnsservers Wi-Fi empty
+```
+
+### Let's Encrypt certificate expired
+
+**Cause:** Certificates expire after 90 days.
+
+**Fix:** On VM:
+```bash
+sudo certbot renew
+
+# Rebuild stunnel certificate
+sudo bash -c 'cat /etc/letsencrypt/live/YOUR_SUBDOMAIN.duckdns.org/fullchain.pem \
+              /etc/letsencrypt/live/YOUR_SUBDOMAIN.duckdns.org/privkey.pem \
+              > /etc/stunnel/server.pem'
+sudo systemctl restart stunnel4
+```
+
+**Automate renewal:** Add to crontab:
+```bash
+0 0 1 * * certbot renew --quiet && cat /etc/letsencrypt/live/YOUR_SUBDOMAIN.duckdns.org/fullchain.pem /etc/letsencrypt/live/YOUR_SUBDOMAIN.duckdns.org/privkey.pem > /etc/stunnel/server.pem && systemctl restart stunnel4
+```
+
+### Browser using DNS-over-HTTPS (DoH) bypassing your DNS
+
+**Cause:** Chrome/Firefox have built-in DoH that bypasses system DNS.
+
+**Fix:**
+- Chrome: `chrome://settings/security` → disable "Use secure DNS"
+- Firefox: `about:preferences#privacy` → Network Settings → disable "Enable DNS over HTTPS"
+
+---
 
 ## Managing the Daemon
 
@@ -135,65 +588,19 @@ systemctl --user stop block-daemon    # Stop
 systemctl --user disable block-daemon # Disable
 ```
 
-## Passwordless Sudo
-
-The setup script configures passwordless sudo for specific commands needed to modify `/etc/hosts`. This allows the daemon and CLI to block/unblock sites without prompting for a password.
-
-### What's configured
-
-A file is created at `/etc/sudoers.d/block-distractions` with rules for:
-
-**macOS:**
-```
-<username> ALL=(ALL) NOPASSWD: /bin/cp * /etc/hosts
-<username> ALL=(ALL) NOPASSWD: /usr/bin/dscacheutil -flushcache
-<username> ALL=(ALL) NOPASSWD: /usr/bin/killall -HUP mDNSResponder
-```
-
-**Linux:**
-```
-<username> ALL=(ALL) NOPASSWD: /bin/cp * /etc/hosts
-<username> ALL=(ALL) NOPASSWD: /usr/bin/systemd-resolve --flush-caches
-```
-
-### Security implications
-
-- **Minimal scope**: Only allows writing to `/etc/hosts` and flushing DNS cache
-- **No shell escalation**: Cannot be used to gain full root access
-- **Worst case**: Someone with access to your user account could redirect domains
-
-### Manual setup (if needed)
-
-If the automatic setup fails, create `/etc/sudoers.d/block-distractions` manually:
-
-```bash
-sudo visudo -f /etc/sudoers.d/block-distractions
-```
-
-Add the appropriate rules for your OS (see above), then:
-
-```bash
-sudo chmod 440 /etc/sudoers.d/block-distractions
-```
-
-### Removing passwordless sudo
-
-```bash
-sudo rm /etc/sudoers.d/block-distractions
-```
+---
 
 ## Uninstalling
 
 ```bash
+# Revert DNS to automatic
+sudo networksetup -setdnsservers Wi-Fi empty
+
 # Stop daemon
 launchctl bootout gui/$(id -u)/com.block.daemon  # macOS
-# or
-systemctl --user disable --now block-daemon  # Linux
 
 # Remove daemon config
-rm ~/Library/LaunchAgents/com.block.daemon.plist  # macOS
-# or
-rm ~/.config/systemd/user/block-daemon.service  # Linux
+rm ~/Library/LaunchAgents/com.block.daemon.plist
 
 # Remove command
 sudo rm /usr/local/bin/block
@@ -201,249 +608,12 @@ sudo rm /usr/local/bin/block
 # Remove passwordless sudo
 sudo rm /etc/sudoers.d/block-distractions
 
-# Remove hosts entries
-sudo sed -i '' '/BLOCK_DISTRACTIONS/,/END BLOCK_DISTRACTIONS/d' /etc/hosts  # macOS
-# or
-sudo sed -i '/BLOCK_DISTRACTIONS/,/END BLOCK_DISTRACTIONS/d' /etc/hosts  # Linux
+# Remove hosts entries (legacy, may not exist)
+sudo sed -i '' '/BLOCK_DISTRACTIONS/,/END BLOCK_DISTRACTIONS/d' /etc/hosts
+
+# Optional: Delete VM to stop charges
+gcloud compute instances delete dns-server --zone=YOUR_ZONE
 ```
-
-## Remote DNS Sync (for iPhone/Mobile Blocking)
-
-Block Distractions can sync your blocklist to a remote DNS server, enabling blocking on mobile devices like iPhones.
-
-### Architecture
-
-```
-┌──────────────┐         ┌──────────────┐         ┌─────────────────────────┐
-│   iPhone     │         │   Your Mac   │         │   Google Cloud VM       │
-│              │         │              │         │   (always on)           │
-│ DNS: VM IP   │────┐    │ block CLI    │────┐    │                         │
-└──────────────┘    │    └──────────────┘    │    │  /etc/hosts.block:      │
-                    │                        │    │  127.0.0.1 twitter.com  │
-                    │    DNS queries         │    │  127.0.0.1 reddit.com   │
-                    └───────────────────────────▶│                         │
-                                             │    │  dnsmasq:               │
-                         scp /etc/hosts.block┘    │  (answers DNS using     │
-                                                  │   the hosts file)       │
-                                                  └─────────────────────────┘
-```
-
-### How It Works
-
-1. **Your Mac** has `/etc/hosts` blocking sites (local blocking)
-2. **Google Cloud VM** runs `dnsmasq` reading `/etc/hosts.block`
-3. **Your Mac** syncs the blocklist to the VM via SSH/SCP
-4. **Your iPhone** uses the VM as its DNS server
-5. When you `block add twitter.com`, it updates Mac AND syncs to VM
-
-### Remote Sync Commands
-
-```bash
-block sync               # Manually sync blocklist to remote server
-block add <site>         # Add site locally AND sync to remote
-block remove <site>      # Remove site locally AND sync to remote
-```
-
-### Configuration
-
-Add to `config.yaml`:
-
-```yaml
-remote_sync:
-  enabled: true
-  host: YOUR_VM_IP        # e.g., 34.127.22.131
-  user: YOUR_USERNAME     # SSH username
-  hosts_path: /etc/hosts.block
-```
-
----
-
-## Setting Up Remote DNS Server (Google Cloud VM)
-
-### Part 1: Create Google Cloud VM
-
-1. **Create a Google Cloud account** at https://cloud.google.com (free $300 credit for 90 days)
-
-2. **Create a VM instance:**
-   - Go to Compute Engine → VM instances → Create Instance
-   - Name: `dns-server`
-   - Region: Choose one close to you (e.g., `us-west1`)
-   - Machine type: `e2-micro` (free tier eligible, ~$5/mo after trial)
-   - Boot disk: Ubuntu 22.04 LTS, 10GB
-   - Firewall: Allow HTTP (not strictly needed but useful)
-   - Click Create
-
-3. **Note the External IP** (e.g., `34.127.22.131`)
-
-4. **Open firewall ports for DNS:**
-   - Go to VPC Network → Firewall → Create Firewall Rule
-   - Name: `allow-dns`
-   - Direction: Ingress
-   - Targets: All instances in the network
-   - Source IP ranges: `0.0.0.0/0`
-   - Protocols and ports: `tcp:53` and `udp:53`
-   - Click Create
-
-### Part 2: Install dnsmasq on VM
-
-SSH into your VM (via Google Cloud Console or `gcloud compute ssh dns-server`):
-
-```bash
-# Update and install dnsmasq
-sudo apt-get update
-sudo apt-get install -y dnsmasq
-
-# Disable systemd-resolved (conflicts with dnsmasq on port 53)
-sudo sed -i 's/#DNSStubListener=yes/DNSStubListener=no/' /etc/systemd/resolved.conf
-sudo systemctl restart systemd-resolved
-
-# Fix dnsmasq init script (remove --local-service flag that blocks external queries)
-sudo sed -i 's/DNSMASQ_OPTS="${DNSMASQ_OPTS} --local-service"/#DNSMASQ_OPTS="${DNSMASQ_OPTS} --local-service"/' /etc/init.d/dnsmasq
-
-# Configure dnsmasq
-sudo tee /etc/dnsmasq.conf << 'EOF'
-no-resolv
-server=8.8.8.8
-server=8.8.4.4
-no-hosts
-addn-hosts=/etc/hosts.block
-log-queries
-cache-size=1000
-EOF
-
-# Create empty hosts.block file
-sudo touch /etc/hosts.block
-sudo chmod 644 /etc/hosts.block
-
-# Restart dnsmasq
-sudo systemctl restart dnsmasq
-sudo systemctl enable dnsmasq
-
-# Verify it's running
-sudo systemctl status dnsmasq
-ss -ulnp | grep 53
-```
-
-### Part 3: Set Up SSH Key for Passwordless Sync
-
-On your Mac:
-
-```bash
-# Generate SSH key if you don't have one
-ssh-keygen -t ed25519 -C "block-distractions"
-
-# Copy public key to VM
-# Option 1: Via gcloud
-gcloud compute ssh dns-server --command "mkdir -p ~/.ssh"
-cat ~/.ssh/id_ed25519.pub | gcloud compute ssh dns-server --command "cat >> ~/.ssh/authorized_keys"
-
-# Option 2: Manually add to VM's ~/.ssh/authorized_keys via Google Cloud Console
-
-# Test SSH connection
-ssh YOUR_USER@YOUR_VM_IP
-```
-
-### Part 4: Configure Passwordless Sudo on VM
-
-On the VM, create a sudoers file for the sync commands:
-
-```bash
-sudo tee /etc/sudoers.d/block-sync << 'EOF'
-YOUR_USERNAME ALL=(ALL) NOPASSWD: /bin/mv /tmp/hosts.block.tmp /etc/hosts.block
-YOUR_USERNAME ALL=(ALL) NOPASSWD: /bin/chmod 644 /etc/hosts.block
-YOUR_USERNAME ALL=(ALL) NOPASSWD: /bin/chown root\:root /etc/hosts.block
-YOUR_USERNAME ALL=(ALL) NOPASSWD: /usr/bin/killall -HUP dnsmasq
-EOF
-
-sudo chmod 440 /etc/sudoers.d/block-sync
-```
-
-### Part 5: Test the Setup
-
-From your Mac:
-
-```bash
-# Sync blocklist to VM
-./block sync
-
-# Verify blocking works
-dig @YOUR_VM_IP twitter.com +short
-# Should return: 127.0.0.1
-```
-
----
-
-## iPhone DNS Configuration
-
-### The Challenge
-
-iOS requires **encrypted DNS** (DNS over TLS or DNS over HTTPS) for system-wide DNS configuration via profiles. Cleartext DNS is not supported in iOS configuration profiles.
-
-### Current Status: DNS over TLS (DoT) Setup
-
-We have DoT working on the VM using stunnel, but iOS rejects self-signed certificates for DoT connections. The "Certificate Trust Settings" on iOS only applies to web browsing, not system services like DNS.
-
-#### DoT Setup on VM (Already Configured)
-
-```bash
-# Install stunnel
-sudo apt-get install -y stunnel4
-
-# Create/copy TLS certificate (from certs/ directory)
-sudo cp server.pem /etc/stunnel/
-sudo chown stunnel4:stunnel4 /etc/stunnel/server.pem
-sudo chmod 600 /etc/stunnel/server.pem
-
-# Configure stunnel
-sudo tee /etc/stunnel/dns-tls.conf << 'EOF'
-pid = /var/run/stunnel4/dns-tls.pid
-setuid = stunnel4
-setgid = stunnel4
-
-[dns-tls]
-accept = 853
-connect = 127.0.0.1:53
-cert = /etc/stunnel/server.pem
-EOF
-
-# Create pid directory
-sudo mkdir -p /var/run/stunnel4
-sudo chown stunnel4:stunnel4 /var/run/stunnel4
-
-# Enable and start stunnel
-sudo sed -i 's/ENABLED=0/ENABLED=1/' /etc/default/stunnel4
-sudo systemctl restart stunnel4
-sudo systemctl enable stunnel4
-
-# Open port 853 in Google Cloud Firewall
-# (Create rule: allow-dns-tls, tcp:853, 0.0.0.0/0)
-```
-
-### Solution: Use a Real Domain with Let's Encrypt
-
-For iOS to trust the DoT connection, you need a certificate from a trusted CA like Let's Encrypt.
-
-**Requirements:**
-1. A domain name you control
-2. DNS A record pointing to your VM's IP
-
-**Steps (TODO):**
-1. Point domain to VM IP (e.g., `dns.yourdomain.com` → `34.127.22.131`)
-2. Install certbot and get Let's Encrypt certificate
-3. Update stunnel to use the Let's Encrypt certificate
-4. Update iOS profile to use the domain name as ServerName
-
-### Alternative: Per-WiFi DNS (No Profile Needed)
-
-For WiFi-only blocking without a profile:
-
-1. Go to **Settings → WiFi**
-2. Tap the **(i)** next to your network
-3. Tap **Configure DNS → Manual**
-4. Delete existing servers, add your VM IP
-5. Repeat for each WiFi network
-
-**Limitations:** Only works on WiFi, not cellular.
 
 ---
 
@@ -451,80 +621,31 @@ For WiFi-only blocking without a profile:
 
 ```
 block_distractions/
-├── block              # CLI entry point
-├── config.yaml        # Your configuration
-├── setup.sh           # Installation script
-├── pyproject.toml     # Python dependencies
-├── .gitignore         # Git ignore rules
-├── .logs/             # Log files (auto-created, rotated at 1MB)
-│   └── daemon.log
-├── state.json         # Runtime state (auto-created)
-├── lib/               # Python modules
-│   ├── config.py      # Configuration loading
-│   ├── state.py       # Daily state tracking
-│   ├── hosts.py       # /etc/hosts management + remote sync
-│   ├── obsidian.py    # Condition checking
-│   ├── wordcount.py   # Word counting for linked files
-│   ├── unlock.py      # Unlock logic + shame prompts
-│   └── daemon.py      # Background checker
-├── services/          # Daemon service files
+├── block                  # CLI entry point
+├── config.yaml            # Non-sensitive configuration (version controlled)
+├── config.secrets.yaml    # Your secrets: vault path, VM IP, username (git-ignored)
+├── config.secrets.example.yaml  # Template for secrets file
+├── setup.sh               # Installation script
+├── pyproject.toml         # Python dependencies
+├── lib/                   # Python modules
+│   ├── config.py          # Configuration loading
+│   ├── state.py           # Daily state tracking
+│   ├── hosts.py           # /etc/hosts + remote sync (address=// format)
+│   ├── obsidian.py        # Condition checking
+│   ├── wordcount.py       # Word counting for linked files
+│   ├── unlock.py          # Unlock logic + shame prompts
+│   └── daemon.py          # Background checker
+├── services/              # Daemon service files
 │   ├── com.block.daemon.plist     # macOS launchd
 │   └── block-daemon.service       # Linux systemd
-├── certs/             # TLS certificates for DoT (git-ignored)
-│   ├── ca.crt         # Self-signed CA certificate
-│   ├── ca.key         # CA private key
-│   ├── server.crt     # Server certificate
-│   ├── server.key     # Server private key
-│   └── server.pem     # Combined cert+key for stunnel
-└── dns-blocker.mobileconfig  # iOS DNS profile (DoT)
+├── dns-blocker.mobileconfig.example  # iOS DNS profile template
+└── dns-blocker.mobileconfig       # Your iOS profile (git-ignored)
 ```
 
 ---
 
-## Development Notes
+## Security Considerations
 
-### What Works
-
-- ✅ Mac `/etc/hosts` blocking
-- ✅ Proof-of-work unlock via Obsidian
-- ✅ Emergency unlock with escalating waits
-- ✅ Background daemon
-- ✅ Remote sync to Google Cloud VM via SSH/SCP
-- ✅ dnsmasq DNS blocking on VM
-- ✅ DNS over TLS (stunnel) on VM
-- ✅ TLS certificate generation
-
-### What Doesn't Work (Yet)
-
-- ❌ iOS DNS profile with self-signed certificate
-  - iOS rejects self-signed certs for DoT even with CA trusted in Certificate Trust Settings
-  - Need Let's Encrypt certificate with real domain
-
-### Next Steps for iPhone Blocking
-
-1. **Get a domain name** (or use existing one)
-2. **Point DNS to VM IP** (A record: `dns.yourdomain.com` → VM IP)
-3. **Install certbot on VM:**
-   ```bash
-   sudo apt-get install certbot
-   sudo certbot certonly --standalone -d dns.yourdomain.com
-   ```
-4. **Update stunnel config to use Let's Encrypt cert:**
-   ```bash
-   sudo cat /etc/letsencrypt/live/dns.yourdomain.com/fullchain.pem \
-            /etc/letsencrypt/live/dns.yourdomain.com/privkey.pem \
-            > /etc/stunnel/server.pem
-   ```
-5. **Update iOS profile** (`dns-blocker.mobileconfig`):
-   - Change `ServerName` to `dns.yourdomain.com`
-   - Remove the CA certificate payload (not needed with Let's Encrypt)
-6. **Set up auto-renewal** for Let's Encrypt certificate
-
-### Domain Options
-
-If you need a domain:
-- **Free:** Freenom (.tk, .ml, etc.) - unreliable
-- **Cheap:** Namecheap, Porkbun (~$10/year for .com)
-- **Free subdomains:** DuckDNS, No-IP (dynamic DNS services)
-
-**Note:** GitHub Pages cannot be used for this - it only serves static websites, not DNS records.
+- **VM exposure**: Your DNS server is publicly accessible. Consider restricting source IPs in firewall rules if you have a static IP.
+- **DNS privacy**: All your DNS queries go through your VM. The VM logs are only accessible to you.
+- **Bypassing**: Determined users can change DNS settings. This tool is for self-control, not enforced restriction.

@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  iOS DNS-over-TLS Configuration Profile Template
+
+  To create your profile:
+  1. Copy this file to dns-blocker.mobileconfig
+  2. Replace YOUR_VM_IP with your Google Cloud VM's external IP
+  3. Replace YOUR_SUBDOMAIN.duckdns.org with your DuckDNS domain
+  4. Transfer to iPhone via AirDrop or email
+  5. Install: Settings → General → VPN & Device Management
+-->
+<plist version="1.0">
+<dict>
+    <key>PayloadContent</key>
+    <array>
+        <dict>
+            <key>DNSSettings</key>
+            <dict>
+                <key>DNSProtocol</key>
+                <string>TLS</string>
+                <key>ServerAddresses</key>
+                <array>
+                    <string>YOUR_VM_IP</string>
+                </array>
+                <key>ServerName</key>
+                <string>YOUR_SUBDOMAIN.duckdns.org</string>
+            </dict>
+            <key>OnDemandRules</key>
+            <array>
+                <dict>
+                    <key>Action</key>
+                    <string>Connect</string>
+                </dict>
+            </array>
+            <key>PayloadDisplayName</key>
+            <string>Block Distractions DNS</string>
+            <key>PayloadIdentifier</key>
+            <string>com.blockdistractions.dns.settings</string>
+            <key>PayloadType</key>
+            <string>com.apple.dnsSettings.managed</string>
+            <key>PayloadUUID</key>
+            <string>B2C3D4E5-F6A7-8901-BCDE-F12345678901</string>
+            <key>PayloadVersion</key>
+            <integer>1</integer>
+        </dict>
+    </array>
+    <key>PayloadDescription</key>
+    <string>Configures DNS over TLS to block distracting websites</string>
+    <key>PayloadDisplayName</key>
+    <string>Block Distractions</string>
+    <key>PayloadIdentifier</key>
+    <string>com.blockdistractions.profile</string>
+    <key>PayloadOrganization</key>
+    <string>Block Distractions</string>
+    <key>PayloadRemovalDisallowed</key>
+    <false/>
+    <key>PayloadType</key>
+    <string>Configuration</string>
+    <key>PayloadUUID</key>
+    <string>A1B2C3D4-E5F6-7890-ABCD-EF1234567890</string>
+    <key>PayloadVersion</key>
+    <integer>1</integer>
+</dict>
+</plist>

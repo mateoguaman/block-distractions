@@ -1,12 +1,10 @@
+# Block Distractions Configuration
+# Sensitive settings (vault_path, remote_sync host/user) go in config.secrets.yaml
+
 obsidian:
-  vault_path: /Users/mateo/Documents/mateo-md
+  # vault_path: Set in config.secrets.yaml
   daily_note_pattern: Daily/{date}.md
-# Remote DNS sync (uncomment to enable iPhone blocking)
-# remote_sync:
-#   enabled: true
-#   host: YOUR_VM_IP          # e.g., 34.127.22.131
-#   user: YOUR_SSH_USERNAME
-#   hosts_path: /etc/hosts.block
+
 conditions:
   workout:
     type: checkbox
@@ -16,16 +14,19 @@ conditions:
     section: Writing
     section_any_level: true
     minimum: 500
+
 auto_unlock:
   enabled: true
   earliest_time: '17:00'
   check_interval: 300
+
 unlock:
   proof_of_work_duration: 7200
   emergency_duration: 300
   emergency_max_per_day: 3
   emergency_initial_wait: 30
   emergency_wait_multiplier: 2
+
 blocked_sites:
 - twitter.com
 - x.com
@@ -60,3 +61,11 @@ blocked_sites:
 - quanta.com
 - quantamagazine.org
 - primicias.ec
+- dotdashmeredith.com
+- people.inc
+
+remote_sync:
+  enabled: true
+  # host: Set in config.secrets.yaml
+  # user: Set in config.secrets.yaml
+  blocklist_path: /etc/dnsmasq.d/blocklist.conf
