@@ -61,9 +61,10 @@ $USER ALL=(ALL) NOPASSWD: /usr/bin/dscacheutil -flushcache
 $USER ALL=(ALL) NOPASSWD: /usr/bin/killall -HUP mDNSResponder
 "
 elif [ "$OS" = "Linux" ]; then
-    # Linux sudoers rules
+    # Linux sudoers rules (include both resolvectl and systemd-resolve for compatibility)
     SUDOERS_CONTENT="# Block Distractions - passwordless sudo for hosts file
 $USER ALL=(ALL) NOPASSWD: /bin/cp * /etc/hosts
+$USER ALL=(ALL) NOPASSWD: /usr/bin/resolvectl flush-caches
 $USER ALL=(ALL) NOPASSWD: /usr/bin/systemd-resolve --flush-caches
 "
 fi

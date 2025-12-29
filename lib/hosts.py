@@ -74,11 +74,16 @@ class HostsManager:
                     capture_output=True,
                 )
             elif system == "Linux":
-                # Try systemd-resolved first
-                subprocess.run(
-                    ["sudo", "systemd-resolve", "--flush-caches"],
+                # Try resolvectl first (Ubuntu 20.04+), fall back to systemd-resolve
+                result = subprocess.run(
+                    ["sudo", "resolvectl", "flush-caches"],
                     capture_output=True,
                 )
+                if result.returncode != 0:
+                    subprocess.run(
+                        ["sudo", "systemd-resolve", "--flush-caches"],
+                        capture_output=True,
+                    )
         except Exception:
             pass  # DNS flush is best-effort
 

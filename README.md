@@ -68,13 +68,19 @@ If you already have a VM set up, just configure your devices:
 sudo networksetup -setdnsservers Wi-Fi YOUR_VM_IP
 ```
 
+**Ubuntu:**
+```bash
+sudo resolvectl dns eth0 YOUR_VM_IP
+# or use NetworkManager - see full setup guide
+```
+
 **iPhone:** Install the DNS profile (see [iPhone Setup](#iphone-dns-configuration))
 
 ---
 
 ## Full Setup Guide
 
-### Part 1: Local Setup (Mac)
+### Part 1: Local Setup (Mac/Ubuntu)
 
 ```bash
 # Clone the repo
@@ -84,9 +90,11 @@ cd block_distractions
 # Create your secrets file from the template
 cp config.secrets.example.yaml config.secrets.yaml
 
-# Run setup (installs dependencies, creates block command)
+# Run setup (installs dependencies, creates block command, configures daemon)
 ./setup.sh
 ```
+
+The setup script automatically detects your OS and configures the appropriate daemon (launchd on macOS, systemd on Ubuntu).
 
 **Important:** The `config.secrets.yaml` file contains your personal settings (Obsidian vault path, VM IP, SSH username) and is git-ignored. You'll fill in the values as you complete the setup.
 
@@ -100,6 +108,12 @@ cp config.secrets.example.yaml config.secrets.yaml
    ```bash
    # macOS
    brew install google-cloud-sdk
+
+   # Ubuntu
+   sudo apt-get install apt-transport-https ca-certificates gnupg curl
+   curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+   echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
+   sudo apt-get update && sudo apt-get install google-cloud-cli
 
    # Then authenticate
    gcloud auth login
@@ -255,17 +269,49 @@ dig @YOUR_VM_IP google.com A +short
 # Should return real IP (not blocked)
 ```
 
-### Part 7: Point Mac DNS to VM
+### Part 7: Point Your DNS to VM
 
+**macOS:**
 ```bash
 sudo networksetup -setdnsservers Wi-Fi YOUR_VM_IP
 ```
 
-**Test in Safari:** Try loading a blocked site - it should fail.
-
-**To revert (use router's DNS):**
+**Ubuntu (using systemd-resolved):**
 ```bash
+# Set DNS server (temporary, resets on reboot)
+sudo resolvectl dns eth0 YOUR_VM_IP
+
+# Or edit netplan config for permanent change
+sudo nano /etc/netplan/01-netcfg.yaml
+# Add under your interface:
+#   nameservers:
+#     addresses: [YOUR_VM_IP]
+sudo netplan apply
+```
+
+**Ubuntu (using NetworkManager):**
+```bash
+# Find your connection name
+nmcli connection show
+# Set DNS (replace "Wired connection 1" with your connection name)
+nmcli connection modify "Wired connection 1" ipv4.dns YOUR_VM_IP
+nmcli connection modify "Wired connection 1" ipv4.ignore-auto-dns yes
+nmcli connection up "Wired connection 1"
+```
+
+**Test:** Try loading a blocked site - it should fail.
+
+**To revert (use automatic DNS):**
+```bash
+# macOS
 sudo networksetup -setdnsservers Wi-Fi empty
+
+# Ubuntu (systemd-resolved)
+sudo resolvectl revert eth0
+
+# Ubuntu (NetworkManager)
+nmcli connection modify "Wired connection 1" ipv4.ignore-auto-dns no
+nmcli connection up "Wired connection 1"
 ```
 
 ---
@@ -472,20 +518,30 @@ remote_sync:
 
 ## Gotchas and Troubleshooting
 
-### Safari still loads blocked sites
+### Browser still loads blocked sites
 
-**Cause:** Safari is using cached DNS or the DNS change hasn't propagated.
+**Cause:** Browser is using cached DNS or the DNS change hasn't propagated.
 
 **Fix:**
 ```bash
-# Flush DNS cache
+# Flush DNS cache (macOS)
 sudo dscacheutil -flushcache && sudo killall -9 mDNSResponder
 
-# Clear Safari cache
+# Flush DNS cache (Ubuntu)
+sudo resolvectl flush-caches
+# or on older systems:
+sudo systemd-resolve --flush-caches
+
+# Clear browser cache (Safari)
 # Safari → Settings → Privacy → Manage Website Data → Remove All
 
-# Verify DNS is pointing to VM
+# Verify DNS is pointing to VM (macOS)
 scutil --dns | grep nameserver
+
+# Verify DNS is pointing to VM (Ubuntu)
+resolvectl status | grep "DNS Servers"
+# or
+cat /etc/resolv.conf
 # Should show your VM IP
 ```
 
@@ -556,8 +612,11 @@ gcloud compute instances list
 # Check dnsmasq on VM
 gcloud compute ssh dns-server --zone=YOUR_ZONE --command="sudo systemctl status dnsmasq"
 
-# Temporarily revert to automatic DNS
+# Temporarily revert to automatic DNS (macOS)
 sudo networksetup -setdnsservers Wi-Fi empty
+
+# Temporarily revert to automatic DNS (Ubuntu)
+sudo resolvectl revert eth0
 ```
 
 ### Let's Encrypt certificate expired
@@ -610,14 +669,13 @@ systemctl --user disable block-daemon # Disable
 
 ## Uninstalling
 
+**macOS:**
 ```bash
 # Revert DNS to automatic
 sudo networksetup -setdnsservers Wi-Fi empty
 
-# Stop daemon
-launchctl bootout gui/$(id -u)/com.block.daemon  # macOS
-
-# Remove daemon config
+# Stop and remove daemon
+launchctl bootout gui/$(id -u)/com.block.daemon
 rm ~/Library/LaunchAgents/com.block.daemon.plist
 
 # Remove command
@@ -628,7 +686,33 @@ sudo rm /etc/sudoers.d/block-distractions
 
 # Remove hosts entries (legacy, may not exist)
 sudo sed -i '' '/BLOCK_DISTRACTIONS/,/END BLOCK_DISTRACTIONS/d' /etc/hosts
+```
 
+**Ubuntu:**
+```bash
+# Revert DNS to automatic
+sudo resolvectl revert eth0
+# or with NetworkManager:
+nmcli connection modify "Wired connection 1" ipv4.ignore-auto-dns no
+
+# Stop and remove daemon
+systemctl --user stop block-daemon
+systemctl --user disable block-daemon
+rm ~/.config/systemd/user/block-daemon.service
+systemctl --user daemon-reload
+
+# Remove command
+sudo rm /usr/local/bin/block
+
+# Remove passwordless sudo
+sudo rm /etc/sudoers.d/block-distractions
+
+# Remove hosts entries (legacy, may not exist)
+sudo sed -i '/BLOCK_DISTRACTIONS/,/END BLOCK_DISTRACTIONS/d' /etc/hosts
+```
+
+**Both platforms:**
+```bash
 # Optional: Delete VM to stop charges
 gcloud compute instances delete dns-server --zone=YOUR_ZONE
 ```

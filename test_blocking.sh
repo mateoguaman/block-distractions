@@ -29,7 +29,12 @@ for site in $SITES; do
     IPV6=$(dig +short AAAA "$site" 2>/dev/null | head -1)
 
     # Check system resolver (what apps actually use)
-    PING_IP=$(ping -c 1 -t 1 "$site" 2>/dev/null | head -1 | grep -oE '\(([0-9]+\.){3}[0-9]+\)' | tr -d '()')
+    # Note: -t sets TTL on macOS, -W sets timeout on Linux
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        PING_IP=$(ping -c 1 -t 1 "$site" 2>/dev/null | head -1 | grep -oE '\(([0-9]+\.){3}[0-9]+\)' | tr -d '()')
+    else
+        PING_IP=$(ping -c 1 -W 1 "$site" 2>/dev/null | head -1 | grep -oE '\(([0-9]+\.){3}[0-9]+\)' | tr -d '()')
+    fi
 
     # Determine status
     STATUS="?"
@@ -82,5 +87,9 @@ if [ $FAILED -gt 0 ]; then
     echo ""
     echo "Failed sites:$FAILED_SITES"
     echo ""
-    echo "Try running: sudo killall -9 mDNSResponder"
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        echo "Try running: sudo killall -9 mDNSResponder"
+    else
+        echo "Try running: sudo systemd-resolve --flush-caches"
+    fi
 fi
