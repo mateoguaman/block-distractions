@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .config import get_config
 from .state import get_state
-from .hosts import get_hosts_manager
+from .hosts import get_hosts_manager, get_remote_sync_manager
 from .obsidian import get_obsidian_parser
 from .unlock import get_unlock_manager
 
@@ -50,8 +50,9 @@ class BlockDaemon:
             self.config.obsidian_vault_path,
             self.config.daily_note_pattern,
         )
+        self.remote_sync = get_remote_sync_manager(self.config.remote_sync_settings)
         self.unlock_manager = get_unlock_manager(
-            self.config, self.state, self.hosts, self.obsidian
+            self.config, self.state, self.hosts, self.obsidian, self.remote_sync
         )
         self.running = False
 
@@ -97,6 +98,11 @@ class BlockDaemon:
                 duration = self.config.unlock_settings.get("proof_of_work_duration", 7200)
                 self.state.set_unlocked(duration)
                 self.hosts.unblock_sites()
+                # Sync to remote (unblock all)
+                if self.remote_sync.enabled:
+                    success, msg = self.remote_sync.sync([])
+                    if not success:
+                        logger.error(f"Remote sync failed during auto-unlock: {msg}")
                 logger.info(f"Auto-unlocked for {duration} seconds")
             else:
                 # Make sure blocking is in sync with state
@@ -104,10 +110,18 @@ class BlockDaemon:
                     if not self.hosts.is_blocking_active():
                         logger.info("Re-enabling blocking...")
                         self.hosts.block_sites(self.config.blocked_sites)
+                        if self.remote_sync.enabled:
+                            success, msg = self.remote_sync.sync(self.config.blocked_sites)
+                            if not success:
+                                logger.error(f"Remote sync failed during re-block: {msg}")
                 else:
                     if self.hosts.is_blocking_active():
                         logger.info("Removing blocks (unlocked)...")
                         self.hosts.unblock_sites()
+                        if self.remote_sync.enabled:
+                            success, msg = self.remote_sync.sync([])
+                            if not success:
+                                logger.error(f"Remote sync failed during unblock: {msg}")
 
         except Exception as e:
             logger.error(f"Error during check: {e}")

@@ -526,6 +526,24 @@ EOF
 
 **Fix:** On the VM, create `/etc/sudoers.d/block-sync` (see [Part 5](#part-5-configure-passwordless-sudo-on-vm)).
 
+### Remote sync intermittently fails
+
+**Cause:** SSH connections to Google Cloud VMs can occasionally be reset by peer.
+
+**Behavior:** The tool automatically retries transient SSH failures up to 3 times with exponential backoff (2s, 4s, 8s delays). Failures are logged to `.logs/daemon.log`.
+
+**Check logs:**
+```bash
+tail -f .logs/daemon.log | grep -i "sync"
+```
+
+**Transient errors that trigger retry:**
+- "Connection reset by peer"
+- "Connection refused"
+- "Connection timed out"
+- "Network is unreachable"
+- "No route to host"
+
 ### DNS not working at all (can't load any sites)
 
 **Cause:** VM is down, dnsmasq crashed, or firewall blocking.

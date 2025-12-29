@@ -66,6 +66,8 @@ Mac/iPhone → DNS queries → Google Cloud VM (dnsmasq) → blocks via address=
 - Config loading: defaults → config.yaml → config.secrets.yaml (deep merge)
 - State persisted as JSON, auto-resets daily
 - Remote sync via SSH/SCP to VM's `/etc/dnsmasq.d/blocklist.conf`
+- **Retry with exponential backoff** for transient SSH failures (3 retries, 2s→4s→8s backoff)
+- All sync operations log failures to daemon.log
 
 ### Daemon Service Files
 

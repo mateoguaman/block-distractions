@@ -1,9 +1,12 @@
 """Hosts file management for blocking sites."""
 
+import logging
 import subprocess
 import tempfile
-import shutil
+import time
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 HOSTS_FILE = Path("/etc/hosts")
 BEGIN_MARKER = "# BEGIN BLOCK_DISTRACTIONS"
@@ -187,7 +190,14 @@ class RemoteSyncManager:
 
     Uses dnsmasq address=// format which blocks ALL DNS record types
     (A, AAAA, HTTPS, SVCB, etc.) to prevent Safari's HTTPS record bypass.
+
+    Includes retry logic with exponential backoff for SSH connection failures.
     """
+
+    # Retry settings
+    MAX_RETRIES = 3
+    INITIAL_BACKOFF = 2  # seconds
+    BACKOFF_MULTIPLIER = 2
 
     def __init__(self, config: dict):
         self.enabled = config.get("enabled", False)
@@ -196,8 +206,50 @@ class RemoteSyncManager:
         # Default to new dnsmasq.d location for address= format
         self.remote_path = config.get("blocklist_path", "/etc/dnsmasq.d/blocklist.conf")
 
+    def _run_with_retry(self, cmd: list[str], description: str) -> tuple[bool, str]:
+        """Run a command with retry logic for transient SSH failures.
+
+        Returns:
+            Tuple of (success, error_message or empty string)
+        """
+        backoff = self.INITIAL_BACKOFF
+        last_error = ""
+
+        for attempt in range(self.MAX_RETRIES):
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+            if result.returncode == 0:
+                return True, ""
+
+            last_error = result.stderr.strip()
+
+            # Check if it's a transient SSH error worth retrying
+            transient_errors = [
+                "Connection reset by peer",
+                "Connection refused",
+                "Connection timed out",
+                "Network is unreachable",
+                "No route to host",
+            ]
+            is_transient = any(err in last_error for err in transient_errors)
+
+            if not is_transient or attempt == self.MAX_RETRIES - 1:
+                # Non-transient error or final attempt
+                break
+
+            logger.warning(
+                f"Remote sync {description} failed (attempt {attempt + 1}/{self.MAX_RETRIES}): "
+                f"{last_error}. Retrying in {backoff}s..."
+            )
+            time.sleep(backoff)
+            backoff *= self.BACKOFF_MULTIPLIER
+
+        return False, last_error
+
     def sync(self, sites: list[str]) -> tuple[bool, str]:
         """Sync blocked sites to remote server.
+
+        Includes retry logic with exponential backoff for transient SSH failures.
 
         Returns:
             Tuple of (success, message)
@@ -218,44 +270,45 @@ class RemoteSyncManager:
                 lines.append(f"address=/www.{site}/")
         content = "\n".join(sorted(set(lines))) + "\n" if lines else ""
 
+        temp_path = None
         try:
             # Write to temp file
             with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".conf") as f:
                 f.write(content)
                 temp_path = f.name
 
-            # Copy to remote server
+            # Copy to remote server with retry
             remote = f"{self.user}@{self.host}"
-            result = subprocess.run(
+            success, error = self._run_with_retry(
                 ["scp", temp_path, f"{remote}:/tmp/blocklist.conf.tmp"],
-                capture_output=True,
-                text=True,
+                "scp"
             )
+            if not success:
+                return False, f"Failed to copy to remote: {error}"
 
-            if result.returncode != 0:
-                return False, f"Failed to copy to remote: {result.stderr}"
-
-            # Move to final location, fix permissions, and restart dnsmasq
-            result = subprocess.run(
+            # Move to final location, fix permissions, and restart dnsmasq with retry
+            success, error = self._run_with_retry(
                 ["ssh", remote,
                  f"sudo mv /tmp/blocklist.conf.tmp {self.remote_path} && "
                  f"sudo chmod 644 {self.remote_path} && "
                  f"sudo chown root:root {self.remote_path} && "
                  "sudo systemctl restart dnsmasq"],
-                capture_output=True,
-                text=True,
+                "ssh"
             )
+            if not success:
+                return False, f"Failed to update remote: {error}"
 
-            # Clean up temp file
-            Path(temp_path).unlink(missing_ok=True)
-
-            if result.returncode != 0:
-                return False, f"Failed to update remote: {result.stderr}"
-
+            logger.info(f"Remote sync successful: {len(sites)} sites to {self.host}")
             return True, f"Synced {len(sites)} sites to {self.host}"
 
+        except subprocess.TimeoutExpired:
+            return False, "Remote sync timed out"
         except Exception as e:
+            logger.error(f"Remote sync error: {e}")
             return False, f"Sync error: {e}"
+        finally:
+            if temp_path:
+                Path(temp_path).unlink(missing_ok=True)
 
 
 def get_remote_sync_manager(config: dict) -> RemoteSyncManager:

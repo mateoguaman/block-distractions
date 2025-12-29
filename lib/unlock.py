@@ -1,12 +1,15 @@
 """Unlock logic and shame prompts."""
 
+import logging
 import sys
 import time
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
 from .config import Config
 from .state import State
-from .hosts import HostsManager
+from .hosts import HostsManager, RemoteSyncManager
 from .obsidian import ObsidianParser
 from .wordcount import WordCounter
 
@@ -31,12 +34,33 @@ class UnlockManager:
         state: State,
         hosts: HostsManager,
         obsidian: ObsidianParser,
+        remote_sync: RemoteSyncManager | None = None,
     ):
         self.config = config
         self.state = state
         self.hosts = hosts
         self.obsidian = obsidian
         self.word_counter = WordCounter(obsidian)
+        self.remote_sync = remote_sync
+
+    def _sync_remote(self) -> bool:
+        """Sync blocking state to remote DNS server.
+
+        Returns:
+            True if sync succeeded or was disabled, False on failure.
+        """
+        if not self.remote_sync or not self.remote_sync.enabled:
+            return True
+
+        # When unblocked, sync empty list to remote; when blocked, sync full list
+        if self.state.is_blocked:
+            success, message = self.remote_sync.sync(self.config.blocked_sites)
+        else:
+            success, message = self.remote_sync.sync([])  # Unblock all on remote
+
+        if not success:
+            logger.error(f"Remote sync failed: {message}")
+        return success
 
     def check_all_conditions(self) -> tuple[bool, list[tuple[str, bool, str]]]:
         """Check all conditions and return results.
@@ -87,6 +111,7 @@ class UnlockManager:
             duration = self.config.unlock_settings.get("proof_of_work_duration", 7200)
             self.state.set_unlocked(duration)
             self.hosts.unblock_sites()
+            self._sync_remote()
 
             hours = duration // 3600
             minutes = (duration % 3600) // 60
@@ -152,6 +177,7 @@ class UnlockManager:
         # Unlock for the emergency duration
         self.state.set_unlocked(duration)
         self.hosts.unblock_sites()
+        self._sync_remote()
 
         minutes = duration // 60
         remaining_unlocks = max_per_day - count
@@ -162,12 +188,14 @@ class UnlockManager:
         """Force sites to be blocked immediately."""
         self.state.force_block()
         self.hosts.block_sites(self.config.blocked_sites)
+        self._sync_remote()
         return "Sites are now blocked."
 
     def sync_blocking_state(self) -> None:
-        """Sync hosts file with current state."""
+        """Sync hosts file and remote DNS with current state."""
         should_block = self.state.is_blocked
         self.hosts.sync_with_config(self.config.blocked_sites, should_block)
+        self._sync_remote()
 
     def get_status(self) -> dict[str, Any]:
         """Get current status."""
@@ -193,6 +221,7 @@ def get_unlock_manager(
     state: State,
     hosts: HostsManager,
     obsidian: ObsidianParser,
+    remote_sync: RemoteSyncManager | None = None,
 ) -> UnlockManager:
     """Get an UnlockManager instance."""
-    return UnlockManager(config, state, hosts, obsidian)
+    return UnlockManager(config, state, hosts, obsidian, remote_sync)
