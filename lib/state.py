@@ -77,10 +77,11 @@ class RemoteStateStore:
             return {}
 
         remote = f"{self.user}@{self.host}"
+        sudo = "sudo " if self.use_sudo else ""
         cmd = [
             "ssh",
             remote,
-            f"flock -s {self.lock_path} -c 'cat {self.state_path} 2>/dev/null || true'",
+            f"flock -s {self.lock_path} -c '{sudo}cat {self.state_path} 2>/dev/null || true'",
         ]
         success, stdout, error = self._run_with_retry(cmd, "load")
         if not success:
