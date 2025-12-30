@@ -44,7 +44,7 @@ class BlockDaemon:
 
     def __init__(self, config_path: Path | str | None = None):
         self.config = get_config(config_path)
-        self.state = get_state()
+        self.state = get_state(self.config)
         self.hosts = get_hosts_manager()
         self.obsidian = get_obsidian_parser(
             self.config.obsidian_vault_path,

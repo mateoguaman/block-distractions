@@ -35,7 +35,7 @@ from lib.daemon import run_daemon, run_check_once
 def get_managers():
     """Initialize and return all managers."""
     config = get_config()
-    state = get_state()
+    state = get_state(config)
     hosts = get_hosts_manager()
     obsidian = get_obsidian_parser(
         config.obsidian_vault_path,
@@ -143,7 +143,7 @@ def cmd_add(args):
     print(f"Added '{site}' to blocklist.")
 
     # Sync hosts file if blocking is active
-    state = get_state()
+    state = get_state(config)
     if state.is_blocked:
         hosts = get_hosts_manager()
         hosts.block_sites(config.blocked_sites)
@@ -176,7 +176,7 @@ def cmd_remove(args):
     print(f"Removed '{site}' from blocklist.")
 
     # Sync hosts file
-    state = get_state()
+    state = get_state(config)
     if state.is_blocked:
         hosts = get_hosts_manager()
         hosts.block_sites(config.blocked_sites)

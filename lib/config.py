@@ -67,6 +67,12 @@ DEFAULT_CONFIG = {
         "buzzfeed.com",
         "9gag.com",
     ],
+    "remote_state": {
+        "enabled": False,
+        "state_path": "/etc/block_distractions/state.json",
+        "lock_path": "/tmp/block_distractions_state.lock",
+        "use_sudo": True,
+    },
 }
 
 
@@ -169,6 +175,11 @@ class Config:
     def remote_sync_settings(self) -> dict[str, Any]:
         """Get remote sync settings."""
         return self.get("remote_sync", {})
+
+    @property
+    def remote_state_settings(self) -> dict[str, Any]:
+        """Get remote state settings."""
+        return self.get("remote_state", {})
 
     def add_blocked_site(self, site: str) -> None:
         """Add a site to the blocklist."""
