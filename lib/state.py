@@ -228,6 +228,10 @@ class State:
             if time.time() < unlocked_until:
                 return False  # Unlock still active
             else:
+                # Unlock expired - persist the blocked state immediately
+                self._state["unlocked_until"] = 0
+                self._state["blocked"] = True
+                self.save()
                 return True  # Unlock expired, should be blocked
         # No unlock was set, use the permanent blocked state
         return self._state.get("blocked", True)
