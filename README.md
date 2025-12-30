@@ -442,6 +442,13 @@ block check               # Run a single condition check
 
 Edit `config.yaml` to customize:
 
+### State & Remote Sync
+
+- **Remote state is stored on the VM** at `/etc/block_distractions/state.json` (see `remote_state` in `config.yaml` / `config.secrets.yaml`). The daemon and CLI read/write this file via SSH + sudo, so make sure your sudoers entry on the VM allows `mv/chmod/chown` for that path.
+- **Day rollover follows the VM’s timezone (or the configured `remote_state.timezone`).** If you set `remote_state.timezone` (e.g., `America/Los_Angeles`), resets follow that TZ; otherwise the VM’s local TZ is used.
+- **Unlock expiry is persisted:** when an unlock expires, the state file is immediately rewritten to `blocked: true` with `unlocked_until: 0` to keep all clients in sync.
+- **Auto-unlock can re-unlock:** with `auto_unlock.enabled: true`, the daemon may unlock again at each check if conditions are met, even right after an expiry. Disable `auto_unlock` temporarily if you need deterministic expiry testing.
+
 ### Obsidian Settings
 
 ```yaml

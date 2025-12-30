@@ -63,7 +63,8 @@ remote_sync:
   host: 34.127.22.131
   user: mateo
 remote_state:
-  enabled: false
+  enabled: true
   state_path: /etc/block_distractions/state.json
   lock_path: /tmp/block_distractions_state.lock
   use_sudo: true
+  timezone: America/Los_Angeles

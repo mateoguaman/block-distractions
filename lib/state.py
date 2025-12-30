@@ -1,6 +1,7 @@
 """Daily state tracking for block_distractions."""
 
 import json
+import shlex
 import logging
 import subprocess
 import tempfile
@@ -30,6 +31,7 @@ class RemoteStateStore:
         self.state_path = config.get("state_path", "/etc/block_distractions/state.json")
         self.state_dir = str(Path(self.state_path).parent)
         self.lock_path = config.get("lock_path", "/tmp/block_distractions_state.lock")
+        self.timezone = config.get("timezone")
         use_sudo = config.get("use_sudo")
         if use_sudo is None:
             use_sudo = self.state_path.startswith(("/etc/", "/var/"))
@@ -107,9 +109,12 @@ class RemoteStateStore:
             return date.today().isoformat()
 
         remote = f"{self.user}@{self.host}"
-        # Use the remote's local date; this matches how users experience their VM
-        # and avoids UTC vs local discrepancies for day rollovers.
-        cmd = ["ssh", remote, "date +%F"]
+        tz_prefix = ""
+        if self.timezone:
+            tz_prefix = f"TZ={shlex.quote(self.timezone)} "
+
+        # Use the remote's local date (or configured TZ) to avoid UTC/local drift.
+        cmd = ["ssh", remote, f"{tz_prefix}date +%F"]
         success, stdout, error = self._run_with_retry(cmd, "date")
         if success and stdout.strip():
             return stdout.strip()

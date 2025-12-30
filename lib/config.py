@@ -72,6 +72,7 @@ DEFAULT_CONFIG = {
         "state_path": "/etc/block_distractions/state.json",
         "lock_path": "/tmp/block_distractions_state.lock",
         "use_sudo": True,
+        "timezone": None,
     },
 }
 
