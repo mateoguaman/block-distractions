@@ -208,9 +208,15 @@ class State:
             if self.remote_store
             else date.today().isoformat()
         )
-        if self._state.get("date") != today:
+        current_tz = (
+            self.remote_store.timezone
+            if self.remote_store and self.remote_store.timezone
+            else "local"
+        )
+        if self._state.get("date") != today or self._state.get("tz") != current_tz:
             self._state = {
                 "date": today,
+                "tz": current_tz,
                 "unlocked_until": 0,
                 "emergency_count": 0,
                 "last_emergency_wait": 0,

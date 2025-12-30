@@ -31,7 +31,7 @@
 ## Security & Configuration Tips
 - Do not commit `config.secrets.yaml` or personal VM details.
 - Remote DNS sync assumes SSH access and passwordless sudo for dnsmasq reloads; document any changes to this flow.
-- Remote state is enabled: state lives on the VM at `/etc/block_distractions/state.json` (uses SSH + sudo). Day rollover follows `remote_state.timezone` if set (e.g., `America/Los_Angeles`), otherwise the VM’s local TZ. Unlock expiry rewrites state to `blocked: true` immediately.
+- Remote state is enabled: state lives on the VM at `/etc/block_distractions/state.json` (uses SSH + sudo). Day rollover follows `remote_state.timezone` if set (e.g., `America/Los_Angeles`), otherwise the VM’s local TZ. Changing timezone forces a daily reset. Unlock expiry rewrites state to `blocked: true` immediately.
 
 ## Agent-Specific Instructions
 - Always run Python commands with `uv run` (never `python`/`python3` directly); treat this as a hard requirement for local development and automation.
