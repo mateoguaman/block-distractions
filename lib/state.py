@@ -98,13 +98,18 @@ class RemoteStateStore:
             return {}
 
     def get_today_iso(self) -> str:
-        """Get today's date (ISO) from the remote host to avoid timezone drift."""
+        """Get today's date (ISO) from the remote host to avoid timezone drift.
+
+        We prefer the remote's local date (without forcing UTC) to respect the
+        host's timezone and avoid surprises across user timezones.
+        """
         if not self.is_configured():
             return date.today().isoformat()
 
         remote = f"{self.user}@{self.host}"
-        # Use UTC to keep a single reference point
-        cmd = ["ssh", remote, "date -u +%F"]
+        # Use the remote's local date; this matches how users experience their VM
+        # and avoids UTC vs local discrepancies for day rollovers.
+        cmd = ["ssh", remote, "date +%F"]
         success, stdout, error = self._run_with_retry(cmd, "date")
         if success and stdout.strip():
             return stdout.strip()
