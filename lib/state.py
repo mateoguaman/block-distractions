@@ -97,6 +97,21 @@ class RemoteStateStore:
             logger.error("Remote state JSON is invalid; starting fresh.")
             return {}
 
+    def get_today_iso(self) -> str:
+        """Get today's date (ISO) from the remote host to avoid timezone drift."""
+        if not self.is_configured():
+            return date.today().isoformat()
+
+        remote = f"{self.user}@{self.host}"
+        # Use UTC to keep a single reference point
+        cmd = ["ssh", remote, "date -u +%F"]
+        success, stdout, error = self._run_with_retry(cmd, "date")
+        if success and stdout.strip():
+            return stdout.strip()
+
+        logger.warning(f"Falling back to local date for remote state: {error}")
+        return date.today().isoformat()
+
     def save_state(self, state: dict[str, Any]) -> None:
         """Save state JSON to the remote host."""
         if not self.is_configured():
@@ -178,7 +193,11 @@ class State:
 
     def _check_day_reset(self) -> None:
         """Reset state if it's a new day."""
-        today = date.today().isoformat()
+        today = (
+            self.remote_store.get_today_iso()
+            if self.remote_store
+            else date.today().isoformat()
+        )
         if self._state.get("date") != today:
             self._state = {
                 "date": today,
