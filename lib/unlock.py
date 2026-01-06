@@ -110,6 +110,7 @@ class UnlockManager:
             # Unlock!
             duration = self.config.unlock_settings.get("proof_of_work_duration", 7200)
             self.state.set_unlocked(duration)
+            self.state.mark_unlocked_via_conditions()  # Prevent auto re-unlock after expiry
             self.hosts.unblock_sites()
             self._sync_remote()
 

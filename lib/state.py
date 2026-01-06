@@ -221,6 +221,7 @@ class State:
                 "emergency_count": 0,
                 "last_emergency_wait": 0,
                 "blocked": True,
+                "unlocked_via_conditions_today": False,
             }
             self.save()
 
@@ -282,6 +283,22 @@ class State:
         """Get the last emergency wait time in seconds."""
         return self._state.get("last_emergency_wait", 0)
 
+    @property
+    def unlocked_via_conditions_today(self) -> bool:
+        """Check if already unlocked via conditions (proof-of-work or auto-unlock) today."""
+        self._check_day_reset()
+        return self._state.get("unlocked_via_conditions_today", False)
+
+    def mark_unlocked_via_conditions(self) -> None:
+        """Mark that conditions-based unlock has been used today.
+
+        This prevents auto-unlock from re-triggering after the first
+        proof-of-work or auto-unlock of the day expires.
+        """
+        self._check_day_reset()
+        self._state["unlocked_via_conditions_today"] = True
+        self.save()
+
     def set_unlocked(self, duration_seconds: int) -> None:
         """Set the unlock duration from now."""
         self._check_day_reset()
@@ -340,6 +357,15 @@ class State:
             "emergency_count": self.emergency_count,
             "emergency_remaining": max(0, 3 - self.emergency_count),  # Will use config
         }
+
+    def get_debug_snapshot(self) -> dict[str, Any]:
+        """Get a detailed snapshot for diagnostics."""
+        self._check_day_reset()
+        blocked = self.is_blocked
+        snapshot = dict(self._state)
+        snapshot["is_blocked"] = blocked
+        snapshot["unlock_remaining"] = self.unlock_remaining_formatted
+        return snapshot
 
 
 def get_state(

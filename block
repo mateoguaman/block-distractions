@@ -19,6 +19,7 @@ Usage:
 
 import sys
 import argparse
+from datetime import datetime
 from pathlib import Path
 
 # Add lib to path
@@ -30,6 +31,7 @@ from lib.hosts import get_hosts_manager, get_remote_sync_manager
 from lib.obsidian import get_obsidian_parser
 from lib.unlock import get_unlock_manager
 from lib.daemon import run_daemon, run_check_once
+from lib.experiment import get_experiment_logger
 
 
 def get_managers():
@@ -46,10 +48,29 @@ def get_managers():
     return config, state, hosts, obsidian, unlock, remote_sync
 
 
+def get_note_info(obsidian):
+    """Get metadata about today's daily note."""
+    note_path = obsidian.get_today_note_path()
+    info = {"path": str(note_path), "exists": note_path.exists()}
+    if info["exists"]:
+        stat = note_path.stat()
+        info["mtime"] = datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds")
+        info["size"] = stat.st_size
+    return info
+
+
 def cmd_status(args):
     """Show current status."""
     config, state, hosts, obsidian, unlock, remote_sync = get_managers()
     status = unlock.get_status()
+    experiment = get_experiment_logger(config)
+    experiment.log_event(
+        "status",
+        status=status,
+        conditions=status.get("conditions", []),
+        note=get_note_info(obsidian),
+        state=state.get_debug_snapshot(),
+    )
 
     print("\n=== Block Distractions Status ===\n")
 
@@ -73,6 +94,14 @@ def cmd_unlock(args):
     """Attempt proof-of-work unlock."""
     config, state, hosts, obsidian, unlock, remote_sync = get_managers()
     success, message = unlock.proof_of_work_unlock()
+    experiment = get_experiment_logger(config)
+    experiment.log_event(
+        "proof_of_work_unlock",
+        success=success,
+        message=message,
+        note=get_note_info(obsidian),
+        state=state.get_debug_snapshot(),
+    )
     print(message)
     return 0 if success else 1
 
@@ -81,6 +110,14 @@ def cmd_emergency(args):
     """Emergency unlock with shame prompt."""
     config, state, hosts, obsidian, unlock, remote_sync = get_managers()
     success, message = unlock.emergency_unlock(interactive=True)
+    experiment = get_experiment_logger(config)
+    experiment.log_event(
+        "emergency_unlock",
+        success=success,
+        message=message,
+        note=get_note_info(obsidian),
+        state=state.get_debug_snapshot(),
+    )
     print(message)
     return 0 if success else 1
 
@@ -88,7 +125,17 @@ def cmd_emergency(args):
 def cmd_on(args):
     """Force enable blocking."""
     config, state, hosts, obsidian, unlock, remote_sync = get_managers()
+    experiment = get_experiment_logger(config)
+    experiment.log_event(
+        "manual_block_on",
+        state_before=state.get_debug_snapshot(),
+        note=get_note_info(obsidian),
+    )
     message = unlock.force_block()
+    experiment.log_event(
+        "manual_block_on_complete",
+        state_after=state.get_debug_snapshot(),
+    )
     print(message)
 
 
@@ -96,12 +143,22 @@ def cmd_off(args):
     """Temporarily disable blocking (for testing)."""
     config, state, hosts, obsidian, unlock, remote_sync = get_managers()
     # This is a testing/setup command - just unblock without conditions
+    experiment = get_experiment_logger(config)
+    experiment.log_event(
+        "manual_block_off",
+        state_before=state.get_debug_snapshot(),
+        note=get_note_info(obsidian),
+    )
     state.set_unlocked(3600)  # 1 hour for testing
     hosts.unblock_sites()
     # Sync to remote (unblock all)
     if remote_sync.enabled:
         remote_sync.sync([])
     print("Blocking disabled for 1 hour (testing mode).")
+    experiment.log_event(
+        "manual_block_off_complete",
+        state_after=state.get_debug_snapshot(),
+    )
 
 
 def cmd_list(args):
@@ -121,6 +178,13 @@ def cmd_sync(args):
     remote_sync = get_remote_sync_manager(config.remote_sync_settings)
 
     success, message = remote_sync.sync(config.blocked_sites)
+    experiment = get_experiment_logger(config)
+    experiment.log_event(
+        "manual_sync",
+        success=success,
+        message=message,
+        blocked_sites_count=len(config.blocked_sites),
+    )
     print(message)
     return 0 if success else 1
 
@@ -141,6 +205,12 @@ def cmd_add(args):
 
     config.add_blocked_site(site)
     print(f"Added '{site}' to blocklist.")
+    experiment = get_experiment_logger(config)
+    experiment.log_event(
+        "blocklist_add",
+        site=site,
+        blocked_sites_count=len(config.blocked_sites),
+    )
 
     # Sync hosts file if blocking is active
     state = get_state(config)
@@ -174,6 +244,12 @@ def cmd_remove(args):
 
     config.remove_blocked_site(site)
     print(f"Removed '{site}' from blocklist.")
+    experiment = get_experiment_logger(config)
+    experiment.log_event(
+        "blocklist_remove",
+        site=site,
+        blocked_sites_count=len(config.blocked_sites),
+    )
 
     # Sync hosts file
     state = get_state(config)
@@ -196,7 +272,11 @@ def cmd_daemon(args):
 
 def cmd_check(args):
     """Run a single check cycle."""
+    config = get_config()
+    experiment = get_experiment_logger(config)
+    experiment.log_event("manual_check_start")
     run_check_once()
+    experiment.log_event("manual_check_complete")
     print("Check complete.")
 
 

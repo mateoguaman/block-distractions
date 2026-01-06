@@ -74,6 +74,11 @@ DEFAULT_CONFIG = {
         "use_sudo": True,
         "timezone": None,
     },
+    "experiment": {
+        "enabled": False,
+        "days": 3,
+        "started_at": None,
+    },
 }
 
 
@@ -181,6 +186,11 @@ class Config:
     def remote_state_settings(self) -> dict[str, Any]:
         """Get remote state settings."""
         return self.get("remote_state", {})
+
+    @property
+    def experiment_settings(self) -> dict[str, Any]:
+        """Get experiment settings."""
+        return self.get("experiment", {})
 
     def add_blocked_site(self, site: str) -> None:
         """Add a site to the blocklist."""

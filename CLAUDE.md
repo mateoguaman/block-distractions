@@ -43,9 +43,51 @@ uv run ./block remove <site>
 
 ## Architecture
 
+### Multi-Machine Setup
+
+The system runs across three types of machines:
+
 ```
-Mac/iPhone → DNS queries → Google Cloud VM (dnsmasq) → blocks via address=/domain/
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              ARCHITECTURE                                    │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  ┌──────────────────┐         ┌──────────────────┐         ┌──────────────┐ │
+│  │   CLIENT DEVICES │         │   DAEMON SERVER  │         │  DNS SERVER  │ │
+│  │   (Mac, iPhone)  │         │     (boss)       │         │ (Google VM)  │ │
+│  ├──────────────────┤         ├──────────────────┤         ├──────────────┤ │
+│  │ • Development    │         │ • Runs daemon    │         │ • dnsmasq    │ │
+│  │ • DNS pointed    │   SSH   │ • Checks Obsidian│   SSH   │ • blocklist  │ │
+│  │   to Google VM   │ ──────► │ • Manages state  │ ──────► │ • DNS-over-  │ │
+│  │ • CLI commands   │         │ • Syncs blocklist│         │   TLS (853)  │ │
+│  │ • Blocked sites  │         │ • Always-on      │         │ • Always-on  │ │
+│  └──────────────────┘         └──────────────────┘         └──────────────┘ │
+│           │                            │                          ▲         │
+│           │                            │                          │         │
+│           └────────────────────────────┴──────── DNS queries ─────┘         │
+│                                                                              │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+**Client Devices (Mac, iPhone, etc.)**:
+- DNS configured to point to Google VM
+- Development happens on Mac
+- Run CLI commands (`block status`, `block unlock`, etc.)
+- Experience blocking when sites are in blocklist
+
+**Daemon Server (boss - boss.cs.washington.edu)**:
+- Ubuntu machine that's always on
+- Runs the `block-daemon` systemd service
+- Checks Obsidian conditions every 5 minutes
+- Manages state (local or remote via `remote_state` config)
+- Syncs blocklist to DNS server via SSH
+- Service: `systemctl --user restart block-daemon`
+
+**DNS Server (Google Cloud VM - 34.127.22.131)**:
+- Runs dnsmasq with `address=/domain/` blocking
+- Receives blocklist updates via SSH/SCP
+- Provides DNS-over-TLS on port 853 (for iPhone)
+- Blocklist at `/etc/dnsmasq.d/blocklist.conf`
 
 ### Core Flow
 
@@ -89,10 +131,72 @@ Mac/iPhone → DNS queries → Google Cloud VM (dnsmasq) → blocks via address=
 - `remote_sync.host`: VM IP address
 - `remote_sync.user`: SSH username
 
+## Testing
+
+The project has a comprehensive test suite using pytest.
+
+```bash
+# Install test dependencies
+uv pip install pytest pytest-mock freezegun
+
+# Run all tests
+uv run pytest tests/ -v
+
+# Run specific test files
+uv run pytest tests/test_state.py -v       # State management tests
+uv run pytest tests/test_unlock.py -v      # Unlock logic tests
+uv run pytest tests/test_daemon.py -v      # Daemon/auto-unlock tests
+uv run pytest tests/test_integration.py -v # Integration tests
+
+# Run bug-related tests
+uv run pytest tests/test_daemon.py::TestAutoUnlockBug -v
+uv run pytest tests/test_integration.py::TestBugScenarios -v
+```
+
+## Experiment Analysis
+
+The project includes experiment logging and analysis tools:
+
+```bash
+# Analyze recent logs (default: 7 days)
+uv run tools/analyze_experiment.py
+
+# Analyze specific number of days with verbose output
+uv run tools/analyze_experiment.py --days 10 -v
+
+# Output as JSON
+uv run tools/analyze_experiment.py --json > results.json
+```
+
+See `docs/EXPERIMENT_PROTOCOL.md` for the multi-day experiment protocol.
+
+## Known Issues
+
+### Repeated Auto-Unlock Bug (FIXED)
+
+**Symptom**: Once unlocked, the system stayed effectively unlocked for the rest of the day.
+
+**Root Cause**: When an unlock expired (after 2 hours), the daemon checked conditions again. If conditions were still met (e.g., workout checkbox still checked), auto-unlock triggered again.
+
+**Fix**: Added `unlocked_via_conditions_today` flag in state that:
+- Gets set when proof-of-work or auto-unlock succeeds
+- Prevents any further auto-unlocks for the rest of the day
+- Resets at midnight (with daily state reset)
+
+**Files Changed**: `lib/state.py`, `lib/daemon.py`, `lib/unlock.py`
+
+**Tests**: See `tests/test_daemon.py::TestAutoUnlockBug` and `tests/test_state.py::TestUnlockedViaConditionsToday`
+
+### Manual Unlock Bypasses earliest_time
+
+**Behavior**: The `block unlock` command (proof-of-work) does NOT check `earliest_time` - only the daemon's auto-unlock does. This means you can manually unlock before the earliest time by running `block unlock` if conditions are met.
+
+**Status**: This may be intentional behavior (user explicitly requesting unlock).
+
 ## Platform Notes
 
 - **Safari HTTPS bypass**: Safari queries HTTPS DNS records with IP hints - only dnsmasq `address=` blocking works
 - **Mac DNS**: Point to VM via `sudo networksetup -setdnsservers Wi-Fi VM_IP`
 - **iPhone DNS**: Uses DNS-over-TLS (port 853) via stunnel on VM with Let's Encrypt cert
 - **Browser DoH**: Chrome/Firefox "Secure DNS" bypasses system DNS - must be disabled
-- **Logs**: `.logs/daemon.log` with 1MB rotation
+- **Logs**: `.logs/daemon.log` with 1MB rotation, `.logs/experiment.log` for experiment data
