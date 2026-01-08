@@ -15,6 +15,8 @@ DEFAULT_CONFIG = {
         "vault_path": "~/Documents/mateo-md",
         "daily_note_pattern": "Daily/{date}.md",
     },
+    # Condition mode: "any" (OR logic) or "all" (AND logic)
+    "condition_mode": "any",
     "conditions": {
         "workout": {
             "type": "checkbox",
@@ -100,12 +102,14 @@ class Config:
                 user_config = yaml.safe_load(f) or {}
             self._deep_merge(self._config, user_config)
 
-        # Load secrets (contains personal paths, IPs, usernames)
+        # Load secrets (contains personal paths, IPs, usernames, API keys)
         secrets_path = self.config_path.parent / "config.secrets.yaml"
         if secrets_path.exists():
             with open(secrets_path, "r") as f:
                 secrets_config = yaml.safe_load(f) or {}
             self._deep_merge(self._config, secrets_config)
+            # Also store secrets separately for condition access
+            self._config["secrets"] = secrets_config
 
         # Expand paths
         if "obsidian" in self._config:
@@ -161,6 +165,15 @@ class Config:
     def conditions(self) -> dict[str, dict]:
         """Get the conditions configuration."""
         return self.get("conditions", {})
+
+    @property
+    def condition_mode(self) -> str:
+        """Get the condition mode ('any' or 'all').
+
+        - 'any' (default): Any single condition met triggers unlock (OR logic)
+        - 'all': All conditions must be met to trigger unlock (AND logic)
+        """
+        return self.get("condition_mode", "any")
 
     @property
     def blocked_sites(self) -> list[str]:

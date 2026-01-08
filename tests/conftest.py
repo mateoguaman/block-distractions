@@ -73,9 +73,16 @@ def mock_config():
             "pattern": "- [x] Workout",
         }
     }
+    config.condition_mode = "any"  # OR logic by default
     config.obsidian_vault_path = Path("/tmp/vault")
     config.daily_note_pattern = "Daily/{date}.md"
     config.remote_sync_settings = {"enabled": False}
+    # Internal config dict for ConditionContext
+    config._config = {
+        "obsidian": {"vault_path": "/tmp/vault"},
+        "conditions": config.conditions,
+        "condition_mode": "any",
+    }
     config.get = lambda key, default=None: getattr(config, key.replace(".", "_"), default)
     return config
 
@@ -132,3 +139,27 @@ def create_state_data(
         "emergency_count": emergency_count,
         "last_emergency_wait": last_emergency_wait,
     }
+
+
+@pytest.fixture
+def mock_condition():
+    """Create a mock condition for testing.
+
+    Returns a mock that can be configured with:
+        mock_condition.check.return_value = (True, "Description")
+        mock_condition.check.side_effect = [(True, "A"), (False, "B")]
+    """
+    condition = MagicMock()
+    condition.check.return_value = (False, "Not checked")
+    return condition
+
+
+@pytest.fixture
+def patch_condition_registry(mock_condition):
+    """Patch ConditionRegistry.create to return the mock condition.
+
+    Use this fixture in tests that need to control condition results.
+    The mock_condition fixture is passed through so tests can configure it.
+    """
+    with patch("lib.unlock.ConditionRegistry.create", return_value=mock_condition):
+        yield mock_condition

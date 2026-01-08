@@ -95,7 +95,7 @@ The system runs across three types of machines:
 
 2. **State**: `lib/state.py` tracks daily state in `state.json` - unlock expiration timestamps, emergency unlock count, auto-resets on new day.
 
-3. **Conditions**: `lib/obsidian.py` parses Obsidian daily notes to check unlock conditions (checkbox, yaml, heading, regex, linked_wordcount). `lib/wordcount.py` handles word counting in linked files.
+3. **Conditions**: `lib/conditions/` provides an extensible condition system. Built-in types (checkbox, yaml, heading, regex, linked_wordcount) use `lib/obsidian.py` for parsing. Custom conditions can be added via the registry pattern. `lib/wordcount.py` handles word counting in linked files.
 
 4. **Unlocking**: `lib/unlock.py` orchestrates proof-of-work (check conditions → unblock for duration) and emergency unlocks (escalating wait times 30s→60s→120s, shame prompts, "I CHOOSE DISTRACTION" confirmation).
 
@@ -110,6 +110,58 @@ The system runs across three types of machines:
 - Remote sync via SSH/SCP to VM's `/etc/dnsmasq.d/blocklist.conf`
 - **Retry with exponential backoff** for transient SSH failures (3 retries, 2s→4s→8s backoff)
 - All sync operations log failures to daemon.log
+
+### Extensible Conditions System
+
+The `lib/conditions/` module provides a plugin-based condition system:
+
+```
+lib/conditions/
+├── __init__.py    # Exports ConditionRegistry, ConditionContext; imports condition modules
+├── base.py        # Condition protocol: check(config) -> (bool, str)
+├── context.py     # ConditionContext: vault_path, secrets, get_secret()
+├── registry.py    # ConditionRegistry: @register decorator, create()
+└── obsidian.py    # Built-in conditions: checkbox, yaml, heading, regex, linked_wordcount
+```
+
+**To add a new condition type:**
+
+1. Create `lib/conditions/yourtype.py`:
+```python
+from lib.conditions import ConditionRegistry, ConditionContext
+
+class YourCondition:
+    def __init__(self, context: ConditionContext):
+        self.api_key = context.get_secret("yourtype.api_key")
+
+    def check(self, config: dict) -> tuple[bool, str]:
+        # Return (met: bool, description: str)
+        return True, "Condition met"
+
+@ConditionRegistry.register("yourtype")
+def create_your_condition(context: ConditionContext):
+    return YourCondition(context)
+```
+
+2. Import in `lib/conditions/__init__.py`:
+```python
+from . import yourtype
+```
+
+3. Use in `config.yaml`:
+```yaml
+conditions:
+  my_check:
+    type: yourtype
+    custom_param: value
+```
+
+**ConditionContext fields:**
+- `vault_path: Path | None` - Obsidian vault path
+- `daily_note_pattern: str` - Pattern for daily notes
+- `secrets: dict` - Full secrets from config.secrets.yaml
+- `full_config: dict` - Merged config
+- `get_secret(path)` - Get secret by dot-path (e.g., `"strava.api_key"`)
 
 ### Daemon Service Files
 

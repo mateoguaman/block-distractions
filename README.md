@@ -474,12 +474,70 @@ conditions:
     minimum: 500
 ```
 
-**Condition types:**
+**Built-in condition types:**
 - `checkbox` - Look for checked `- [x]` items
 - `yaml` - Check YAML frontmatter values
 - `heading` - Check if heading has content
 - `regex` - Custom regex pattern
 - `linked_wordcount` - Count words in `[[linked]]` files under a heading
+
+#### Custom Conditions
+
+The condition system is extensible - you can add new condition types (e.g., Strava activity, GitHub commits, Duolingo streak) without modifying core code.
+
+**Creating a custom condition:**
+
+1. Create `lib/conditions/strava.py`:
+```python
+from lib.conditions import ConditionRegistry, ConditionContext
+
+class StravaCondition:
+    def __init__(self, context: ConditionContext):
+        # Access secrets from config.secrets.yaml
+        self.api_key = context.get_secret("strava.api_key")
+
+    def check(self, config: dict) -> tuple[bool, str]:
+        # config contains your condition config from config.yaml
+        min_minutes = config.get("minimum_minutes", 30)
+
+        # Your logic here - check Strava API, etc.
+        activity_minutes = self._get_today_activity()
+
+        if activity_minutes >= min_minutes:
+            return True, f"Logged {activity_minutes} min activity today"
+        return False, f"Only {activity_minutes} min logged (need {min_minutes})"
+
+# Register the condition type
+@ConditionRegistry.register("strava")
+def create_strava_condition(context: ConditionContext):
+    return StravaCondition(context)
+```
+
+2. Import in `lib/conditions/__init__.py`:
+```python
+from . import obsidian  # existing
+from . import strava    # add this
+```
+
+3. Add to `config.yaml`:
+```yaml
+conditions:
+  daily_activity:
+    type: strava
+    minimum_minutes: 30
+```
+
+4. Add secrets to `config.secrets.yaml`:
+```yaml
+strava:
+  api_key: your_api_key_here
+```
+
+**ConditionContext provides:**
+- `vault_path` - Path to Obsidian vault (for Obsidian-based conditions)
+- `daily_note_pattern` - Pattern for daily notes
+- `get_secret(path)` - Get secrets by dot-path (e.g., `get_secret("strava.api_key")`)
+- `full_config` - Access to entire merged config
 
 ### Unlock Settings
 
@@ -746,10 +804,16 @@ block_distractions/
 │   ├── config.py          # Configuration loading
 │   ├── state.py           # Daily state tracking
 │   ├── hosts.py           # /etc/hosts + remote sync (address=// format)
-│   ├── obsidian.py        # Condition checking
+│   ├── obsidian.py        # Obsidian daily note parsing
 │   ├── wordcount.py       # Word counting for linked files
 │   ├── unlock.py          # Unlock logic + shame prompts
-│   └── daemon.py          # Background checker
+│   ├── daemon.py          # Background checker
+│   └── conditions/        # Extensible condition system
+│       ├── __init__.py    # Exports + triggers registration
+│       ├── base.py        # Condition protocol
+│       ├── context.py     # ConditionContext dataclass
+│       ├── registry.py    # ConditionRegistry
+│       └── obsidian.py    # Built-in Obsidian conditions
 ├── services/              # Daemon service files
 │   ├── com.block.daemon.plist     # macOS launchd
 │   └── block-daemon.service       # Linux systemd

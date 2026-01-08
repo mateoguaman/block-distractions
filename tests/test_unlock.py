@@ -16,7 +16,8 @@ class TestUnlockManagerInit:
     """Tests for UnlockManager initialization."""
 
     def test_initializes_with_dependencies(
-        self, mock_config, mock_state, mock_hosts, mock_obsidian, mock_remote_sync
+        self, mock_config, mock_state, mock_hosts, mock_obsidian, mock_remote_sync,
+        patch_condition_registry
     ):
         """UnlockManager should initialize with all dependencies."""
         manager = UnlockManager(
@@ -34,7 +35,8 @@ class TestProofOfWorkUnlock:
     """Tests for proof_of_work_unlock method."""
 
     def test_returns_already_unlocked_if_not_blocked(
-        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file
+        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file,
+        patch_condition_registry
     ):
         """Should return early if already unlocked."""
         from lib.state import State
@@ -51,10 +53,11 @@ class TestProofOfWorkUnlock:
         assert success is True
         assert "Already unlocked" in message
         # Should not call condition checks
-        mock_obsidian.check_condition.assert_not_called()
+        patch_condition_registry.check.assert_not_called()
 
     def test_unlocks_when_condition_met(
-        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file
+        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file,
+        patch_condition_registry
     ):
         """Should unlock when at least one condition is met."""
         from lib.state import State
@@ -62,7 +65,7 @@ class TestProofOfWorkUnlock:
         state = State(state_path=temp_state_file)
 
         # Mock condition check to return True
-        mock_obsidian.check_condition.return_value = (True, "Checkbox checked")
+        patch_condition_registry.check.return_value = (True, "Checkbox checked")
 
         manager = UnlockManager(
             mock_config, state, mock_hosts, mock_obsidian, mock_remote_sync
@@ -76,13 +79,14 @@ class TestProofOfWorkUnlock:
         mock_hosts.unblock_sites.assert_called_once()
 
     def test_uses_configured_duration(
-        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file
+        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file,
+        patch_condition_registry
     ):
         """Should use proof_of_work_duration from config."""
         from lib.state import State
 
         state = State(state_path=temp_state_file)
-        mock_obsidian.check_condition.return_value = (True, "Checked")
+        patch_condition_registry.check.return_value = (True, "Checked")
         mock_config.unlock_settings["proof_of_work_duration"] = 1800  # 30 minutes
 
         manager = UnlockManager(
@@ -98,13 +102,14 @@ class TestProofOfWorkUnlock:
         assert state.unlocked_until <= after + 1800
 
     def test_fails_when_no_conditions_met(
-        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file
+        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file,
+        patch_condition_registry
     ):
         """Should fail when no conditions are met."""
         from lib.state import State
 
         state = State(state_path=temp_state_file)
-        mock_obsidian.check_condition.return_value = (False, "Not checked")
+        patch_condition_registry.check.return_value = (False, "Not checked")
 
         manager = UnlockManager(
             mock_config, state, mock_hosts, mock_obsidian, mock_remote_sync
@@ -118,13 +123,14 @@ class TestProofOfWorkUnlock:
         mock_hosts.unblock_sites.assert_not_called()
 
     def test_syncs_remote_on_unlock(
-        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file
+        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file,
+        patch_condition_registry
     ):
         """Should sync remote when unlocking."""
         from lib.state import State
 
         state = State(state_path=temp_state_file)
-        mock_obsidian.check_condition.return_value = (True, "Checked")
+        patch_condition_registry.check.return_value = (True, "Checked")
         mock_remote_sync.enabled = True
 
         manager = UnlockManager(
@@ -140,7 +146,8 @@ class TestEmergencyUnlock:
     """Tests for emergency_unlock method."""
 
     def test_fails_when_limit_reached(
-        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file
+        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file,
+        patch_condition_registry
     ):
         """Should fail when daily limit is reached."""
         from lib.state import State
@@ -161,7 +168,8 @@ class TestEmergencyUnlock:
         assert "No emergency unlocks remaining" in message
 
     def test_non_interactive_unlocks_immediately(
-        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file
+        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file,
+        patch_condition_registry
     ):
         """Non-interactive mode should unlock without prompts."""
         from lib.state import State
@@ -180,7 +188,8 @@ class TestEmergencyUnlock:
         mock_hosts.unblock_sites.assert_called_once()
 
     def test_uses_emergency_duration(
-        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file
+        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file,
+        patch_condition_registry
     ):
         """Should use emergency_duration from config (shorter than proof-of-work)."""
         from lib.state import State
@@ -202,7 +211,8 @@ class TestEmergencyUnlock:
         assert state.unlocked_until < before + 7200  # Less than proof-of-work
 
     def test_records_emergency_usage(
-        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file
+        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file,
+        patch_condition_registry
     ):
         """Should record emergency unlock usage."""
         from lib.state import State
@@ -219,7 +229,8 @@ class TestEmergencyUnlock:
         assert state.last_emergency_wait == 30  # initial_wait
 
     def test_escalates_wait_time(
-        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file
+        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file,
+        patch_condition_registry
     ):
         """Wait time should escalate with each use."""
         from lib.state import State
@@ -249,7 +260,8 @@ class TestForceBlock:
     """Tests for force_block method."""
 
     def test_force_block_blocks_sites(
-        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file
+        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file,
+        patch_condition_registry
     ):
         """force_block should enable blocking."""
         from lib.state import State
@@ -268,7 +280,8 @@ class TestForceBlock:
         assert "blocked" in message.lower()
 
     def test_force_block_syncs_remote(
-        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file
+        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file,
+        patch_condition_registry
     ):
         """force_block should sync blocked sites to remote."""
         from lib.state import State
@@ -289,7 +302,8 @@ class TestSyncBlockingState:
     """Tests for sync_blocking_state method."""
 
     def test_syncs_blocked_state(
-        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file
+        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file,
+        patch_condition_registry
     ):
         """Should sync hosts and remote when blocked."""
         from lib.state import State
@@ -307,7 +321,8 @@ class TestSyncBlockingState:
         )
 
     def test_syncs_unblocked_state(
-        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file
+        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file,
+        patch_condition_registry
     ):
         """Should sync unblocked state to hosts and remote."""
         from lib.state import State
@@ -329,7 +344,8 @@ class TestCheckAllConditions:
     """Tests for check_all_conditions method."""
 
     def test_returns_all_condition_results(
-        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file
+        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file,
+        patch_condition_registry
     ):
         """Should return results for all conditions."""
         from lib.state import State
@@ -340,7 +356,7 @@ class TestCheckAllConditions:
             "reading": {"type": "checkbox", "pattern": "- [x] Reading"},
         }
         # First condition met, second not
-        mock_obsidian.check_condition.side_effect = [
+        patch_condition_registry.check.side_effect = [
             (True, "Workout checked"),
             (False, "Reading not checked"),
         ]
@@ -356,13 +372,14 @@ class TestCheckAllConditions:
         assert results[1] == ("reading", False, "Reading not checked")
 
     def test_any_met_false_when_all_fail(
-        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file
+        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file,
+        patch_condition_registry
     ):
         """any_met should be False when no conditions are met."""
         from lib.state import State
 
         state = State(state_path=temp_state_file)
-        mock_obsidian.check_condition.return_value = (False, "Not checked")
+        patch_condition_registry.check.return_value = (False, "Not checked")
 
         manager = UnlockManager(
             mock_config, state, mock_hosts, mock_obsidian, mock_remote_sync
@@ -376,13 +393,14 @@ class TestGetStatus:
     """Tests for get_status method."""
 
     def test_includes_all_status_fields(
-        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file
+        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file,
+        patch_condition_registry
     ):
         """get_status should include all required fields."""
         from lib.state import State
 
         state = State(state_path=temp_state_file)
-        mock_obsidian.check_condition.return_value = (False, "Not checked")
+        patch_condition_registry.check.return_value = (False, "Not checked")
 
         manager = UnlockManager(
             mock_config, state, mock_hosts, mock_obsidian, mock_remote_sync
@@ -397,13 +415,14 @@ class TestGetStatus:
         assert "conditions" in status
 
     def test_conditions_list_format(
-        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file
+        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file,
+        patch_condition_registry
     ):
         """Conditions should be in list format with name, met, description."""
         from lib.state import State
 
         state = State(state_path=temp_state_file)
-        mock_obsidian.check_condition.return_value = (True, "Checked")
+        patch_condition_registry.check.return_value = (True, "Checked")
 
         manager = UnlockManager(
             mock_config, state, mock_hosts, mock_obsidian, mock_remote_sync
@@ -421,7 +440,8 @@ class TestUnlockExpiryBehavior:
     """Tests for unlock expiry behavior - the core bug we're investigating."""
 
     def test_state_becomes_blocked_after_expiry(
-        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file
+        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file,
+        patch_condition_registry
     ):
         """After unlock expires, state should report blocked."""
         from lib.state import State
@@ -439,7 +459,8 @@ class TestUnlockExpiryBehavior:
         assert state.is_blocked is True
 
     def test_sync_detects_expired_unlock(
-        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file
+        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file,
+        patch_condition_registry
     ):
         """sync_blocking_state should detect expired unlock."""
         from lib.state import State
@@ -466,13 +487,14 @@ class TestUnlockExpiryBehavior:
         )
 
     def test_repeated_unlocks_possible(
-        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file
+        self, mock_config, mock_hosts, mock_obsidian, mock_remote_sync, temp_state_file,
+        patch_condition_registry
     ):
         """Multiple unlocks in a day should work (current behavior)."""
         from lib.state import State
 
         state = State(state_path=temp_state_file)
-        mock_obsidian.check_condition.return_value = (True, "Checked")
+        patch_condition_registry.check.return_value = (True, "Checked")
 
         manager = UnlockManager(
             mock_config, state, mock_hosts, mock_obsidian, mock_remote_sync

@@ -136,6 +136,10 @@ class TestAutoUnlockIntegration:
         note_path = temp_vault / "Daily" / f"{today}.md"
         note_path.write_text("- [x] Workout")
 
+        # Set mock_config to use temp_vault (for the new registry-based conditions)
+        mock_config.obsidian_vault_path = temp_vault
+        mock_config._config["obsidian"] = {"vault_path": str(temp_vault)}
+
         state = State(state_path=temp_state_file)
         parser = ObsidianParser(temp_vault, "Daily/{date}.md")
 
@@ -194,6 +198,10 @@ class TestMultipleUnlocksPerDay:
         today = date.today().strftime("%Y-%m-%d")
         note_path = temp_vault / "Daily" / f"{today}.md"
         note_path.write_text("- [x] Workout")
+
+        # Set mock_config to use temp_vault (for the new registry-based conditions)
+        mock_config.obsidian_vault_path = temp_vault
+        mock_config._config["obsidian"] = {"vault_path": str(temp_vault)}
 
         state = State(state_path=temp_state_file)
         parser = ObsidianParser(temp_vault, "Daily/{date}.md")
@@ -281,6 +289,10 @@ class TestBugScenarios:
         note_path = temp_vault / "Daily" / f"{today}.md"
         note_path.write_text("- [x] Workout")
 
+        # Set mock_config to use temp_vault (for the new registry-based conditions)
+        mock_config.obsidian_vault_path = temp_vault
+        mock_config._config["obsidian"] = {"vault_path": str(temp_vault)}
+
         state = State(state_path=temp_state_file)
         parser = ObsidianParser(temp_vault, "Daily/{date}.md")
         mock_hosts = MagicMock()
@@ -315,6 +327,10 @@ class TestBugScenarios:
         today = date.today().strftime("%Y-%m-%d")
         note_path = temp_vault / "Daily" / f"{today}.md"
         note_path.write_text("- [x] Workout")
+
+        # Set mock_config to use temp_vault (for the new registry-based conditions)
+        mock_config.obsidian_vault_path = temp_vault
+        mock_config._config["obsidian"] = {"vault_path": str(temp_vault)}
 
         # Use a time that's definitely after 17:00 for auto_unlock
         mock_config.auto_unlock_settings = {

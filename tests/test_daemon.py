@@ -5,12 +5,26 @@ import time
 from datetime import datetime, date
 from pathlib import Path
 from unittest.mock import MagicMock, patch, PropertyMock
+from contextlib import contextmanager
 
 import pytest
 from freezegun import freeze_time
 
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+
+@contextmanager
+def mock_condition_registry(return_value=(False, "Not checked")):
+    """Context manager to mock the condition registry for daemon tests.
+
+    Args:
+        return_value: The value to return from condition.check()
+    """
+    mock_condition = MagicMock()
+    mock_condition.check.return_value = return_value
+    with patch("lib.unlock.ConditionRegistry.create", return_value=mock_condition):
+        yield mock_condition
 
 
 class TestEvaluateAutoUnlock:
@@ -87,7 +101,8 @@ class TestEvaluateAutoUnlock:
             "check_interval": 300,
         }
 
-        with patch("lib.daemon.get_config", return_value=mock_config), \
+        with mock_condition_registry(return_value=(False, "Not checked")), \
+             patch("lib.daemon.get_config", return_value=mock_config), \
              patch("lib.daemon.get_state") as mock_get_state, \
              patch("lib.daemon.get_hosts_manager") as mock_get_hosts, \
              patch("lib.daemon.get_obsidian_parser") as mock_get_obsidian, \
@@ -97,9 +112,7 @@ class TestEvaluateAutoUnlock:
             state = State(state_path=temp_state_file)
             mock_get_state.return_value = state
             mock_get_hosts.return_value = MagicMock()
-            mock_obsidian = MagicMock()
-            mock_obsidian.check_condition.return_value = (False, "Not checked")
-            mock_get_obsidian.return_value = mock_obsidian
+            mock_get_obsidian.return_value = MagicMock()
             mock_get_remote_sync.return_value = MagicMock(enabled=False)
 
             daemon = BlockDaemon()
@@ -155,7 +168,8 @@ class TestEvaluateAutoUnlock:
             "check_interval": 300,
         }
 
-        with patch("lib.daemon.get_config", return_value=mock_config), \
+        with mock_condition_registry(return_value=(True, "Workout checked")), \
+             patch("lib.daemon.get_config", return_value=mock_config), \
              patch("lib.daemon.get_state") as mock_get_state, \
              patch("lib.daemon.get_hosts_manager") as mock_get_hosts, \
              patch("lib.daemon.get_obsidian_parser") as mock_get_obsidian, \
@@ -165,11 +179,7 @@ class TestEvaluateAutoUnlock:
             state = State(state_path=temp_state_file)
             mock_get_state.return_value = state
             mock_get_hosts.return_value = MagicMock()
-
-            # Mock condition met
-            mock_obsidian = MagicMock()
-            mock_obsidian.check_condition.return_value = (True, "Workout checked")
-            mock_get_obsidian.return_value = mock_obsidian
+            mock_get_obsidian.return_value = MagicMock()
             mock_get_remote_sync.return_value = MagicMock(enabled=False)
 
             daemon = BlockDaemon()
@@ -205,7 +215,8 @@ class TestAutoUnlockBug:
         }
         mock_config.unlock_settings["proof_of_work_duration"] = 7200  # 2 hours
 
-        with patch("lib.daemon.get_config", return_value=mock_config), \
+        with mock_condition_registry(return_value=(True, "Workout checked")), \
+             patch("lib.daemon.get_config", return_value=mock_config), \
              patch("lib.daemon.get_state") as mock_get_state, \
              patch("lib.daemon.get_hosts_manager") as mock_get_hosts, \
              patch("lib.daemon.get_obsidian_parser") as mock_get_obsidian, \
@@ -217,11 +228,7 @@ class TestAutoUnlockBug:
             mock_hosts = MagicMock()
             mock_hosts.is_blocking_active.return_value = True
             mock_get_hosts.return_value = mock_hosts
-
-            # Conditions are met
-            mock_obsidian = MagicMock()
-            mock_obsidian.check_condition.return_value = (True, "Workout checked")
-            mock_get_obsidian.return_value = mock_obsidian
+            mock_get_obsidian.return_value = MagicMock()
             mock_get_remote_sync.return_value = MagicMock(enabled=False)
 
             daemon = BlockDaemon()
@@ -268,7 +275,8 @@ class TestAutoUnlockBug:
             "check_interval": 300,
         }
 
-        with patch("lib.daemon.get_config", return_value=mock_config), \
+        with mock_condition_registry(return_value=(True, "Workout checked")), \
+             patch("lib.daemon.get_config", return_value=mock_config), \
              patch("lib.daemon.get_state") as mock_get_state, \
              patch("lib.daemon.get_hosts_manager") as mock_get_hosts, \
              patch("lib.daemon.get_obsidian_parser") as mock_get_obsidian, \
@@ -282,10 +290,7 @@ class TestAutoUnlockBug:
             mock_hosts = MagicMock()
             mock_hosts.is_blocking_active.return_value = True
             mock_get_hosts.return_value = mock_hosts
-
-            mock_obsidian = MagicMock()
-            mock_obsidian.check_condition.return_value = (True, "Workout checked")
-            mock_get_obsidian.return_value = mock_obsidian
+            mock_get_obsidian.return_value = MagicMock()
             mock_get_remote_sync.return_value = MagicMock(enabled=False)
 
             daemon = BlockDaemon()
@@ -401,7 +406,8 @@ class TestEarliestTimeBug:
             "check_interval": 300,
         }
 
-        with patch("lib.daemon.get_config", return_value=mock_config), \
+        with mock_condition_registry(return_value=(False, "Not checked")), \
+             patch("lib.daemon.get_config", return_value=mock_config), \
              patch("lib.daemon.get_state") as mock_get_state, \
              patch("lib.daemon.get_hosts_manager") as mock_get_hosts, \
              patch("lib.daemon.get_obsidian_parser") as mock_get_obsidian, \
@@ -411,9 +417,7 @@ class TestEarliestTimeBug:
             state = State(state_path=temp_state_file)
             mock_get_state.return_value = state
             mock_get_hosts.return_value = MagicMock()
-            mock_obsidian = MagicMock()
-            mock_obsidian.check_condition.return_value = (False, "Not checked")
-            mock_get_obsidian.return_value = mock_obsidian
+            mock_get_obsidian.return_value = MagicMock()
             mock_get_remote_sync.return_value = MagicMock(enabled=False)
 
             daemon = BlockDaemon()
@@ -479,7 +483,8 @@ class TestRunCheck:
             }
         }
 
-        with patch("lib.daemon.get_config", return_value=mock_config), \
+        with mock_condition_registry(return_value=(False, "Not checked")), \
+             patch("lib.daemon.get_config", return_value=mock_config), \
              patch("lib.daemon.get_state") as mock_get_state, \
              patch("lib.daemon.get_hosts_manager") as mock_get_hosts, \
              patch("lib.daemon.get_obsidian_parser") as mock_get_obsidian, \
@@ -496,8 +501,6 @@ class TestRunCheck:
             mock_get_hosts.return_value = mock_hosts
 
             mock_obsidian = MagicMock()
-            mock_obsidian.check_condition.return_value = (False, "Not checked")
-            mock_obsidian.read_daily_note.return_value = None
             mock_obsidian.get_today_note_path.return_value = Path("/tmp/fake.md")
             mock_get_obsidian.return_value = mock_obsidian
 

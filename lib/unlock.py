@@ -7,11 +7,12 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+from .conditions import ConditionContext, ConditionRegistry
+from .conditions.base import Condition
 from .config import Config
-from .state import State
 from .hosts import HostsManager, RemoteSyncManager
 from .obsidian import ObsidianParser
-from .wordcount import WordCounter
+from .state import State
 
 
 SHAME_PROMPTS = [
@@ -39,9 +40,38 @@ class UnlockManager:
         self.config = config
         self.state = state
         self.hosts = hosts
-        self.obsidian = obsidian
-        self.word_counter = WordCounter(obsidian)
+        self.obsidian = obsidian  # Keep for backwards compatibility
         self.remote_sync = remote_sync
+
+        # Build condition context for the registry system
+        self._condition_context = ConditionContext(
+            vault_path=config.obsidian_vault_path,
+            daily_note_pattern=config.daily_note_pattern,
+            secrets=config.get("secrets", {}),
+            full_config=config._config,
+        )
+
+        # Cache for condition instances (created lazily)
+        self._conditions: dict[str, Condition] = {}
+
+    def _get_condition(self, condition_type: str) -> Condition:
+        """Get or create a condition instance by type.
+
+        Args:
+            condition_type: The condition type (e.g., "checkbox", "strava")
+
+        Returns:
+            A Condition instance
+
+        Raises:
+            ValueError: If condition type is not registered
+        """
+        if condition_type not in self._conditions:
+            self._conditions[condition_type] = ConditionRegistry.create(
+                condition_type,
+                self._condition_context,
+            )
+        return self._conditions[condition_type]
 
     def _sync_remote(self) -> bool:
         """Sync blocking state to remote DNS server.
@@ -65,26 +95,45 @@ class UnlockManager:
     def check_all_conditions(self) -> tuple[bool, list[tuple[str, bool, str]]]:
         """Check all conditions and return results.
 
+        Supports two modes via config.condition_mode:
+        - "any" (default): Returns True if ANY condition is met (OR logic)
+        - "all": Returns True only if ALL conditions are met (AND logic)
+
+        Errors are handled fail-safe: if a condition check fails, it counts as not met.
+
         Returns:
-            Tuple of (any_met, list of (condition_name, met, description))
+            Tuple of (conditions_satisfied, list of (condition_name, met, description))
         """
         conditions = self.config.conditions
         results: list[tuple[str, bool, str]] = []
-        any_met = False
 
         for name, condition_config in conditions.items():
             condition_type = condition_config.get("type", "checkbox")
 
-            if condition_type == "linked_wordcount":
-                met, description, _ = self.word_counter.check_wordcount_condition(condition_config)
-            else:
-                met, description = self.obsidian.check_condition(condition_config)
+            try:
+                condition = self._get_condition(condition_type)
+                met, description = condition.check(condition_config)
+            except ValueError as e:
+                # Unknown condition type
+                logger.error(f"Condition '{name}' has unknown type '{condition_type}': {e}")
+                met, description = False, f"Unknown type: {condition_type}"
+            except Exception as e:
+                # Condition check failed - fail safe (count as not met)
+                logger.error(f"Condition '{name}' check failed: {e}")
+                met, description = False, f"Error: {e}"
 
             results.append((name, met, description))
-            if met:
-                any_met = True
 
-        return any_met, results
+        # Determine if conditions are satisfied based on mode
+        mode = self.config.condition_mode
+        if mode == "all":
+            # AND logic: all conditions must be met
+            conditions_satisfied = all(met for _, met, _ in results) if results else False
+        else:
+            # OR logic (default): any condition met is sufficient
+            conditions_satisfied = any(met for _, met, _ in results)
+
+        return conditions_satisfied, results
 
     def proof_of_work_unlock(self) -> tuple[bool, str]:
         """Attempt proof-of-work unlock.
@@ -98,7 +147,7 @@ class UnlockManager:
             return True, f"Already unlocked. {remaining} remaining."
 
         # Check conditions
-        any_met, results = self.check_all_conditions()
+        conditions_satisfied, results = self.check_all_conditions()
 
         # Build status message
         status_lines = ["Condition check results:"]
@@ -106,7 +155,7 @@ class UnlockManager:
             status = "PASS" if met else "FAIL"
             status_lines.append(f"  [{status}] {name}: {description}")
 
-        if any_met:
+        if conditions_satisfied:
             # Unlock!
             duration = self.config.unlock_settings.get("proof_of_work_duration", 7200)
             self.state.set_unlocked(duration)

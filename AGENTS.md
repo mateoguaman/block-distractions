@@ -3,6 +3,7 @@
 ## Project Structure & Module Organization
 - `block` is the CLI entry point.
 - `lib/` contains core Python modules (config, state, hosts/remote sync, Obsidian parsing, unlock logic, daemon).
+- `lib/conditions/` is the extensible condition system with registry pattern (see below).
 - `services/` holds service definitions for macOS `launchd` and Linux `systemd`.
 - `config.yaml` is versioned defaults; `config.secrets.yaml` is local secrets (git-ignored) with a template at `config.secrets.example.yaml`.
 - `dns-blocker.mobileconfig.example` is the iOS DNS profile template; local profiles live in `dns-blocker.mobileconfig`.
@@ -20,8 +21,9 @@
 - No formatter or linter is configured; keep diffs small and readable.
 
 ## Testing Guidelines
-- There is no unit test suite yet; testing is primarily via `./test_blocking.sh`.
-- When adding features, include a manual verification note in your PR describing how you tested (command and expected output).
+- Unit tests are in `tests/` using pytest. Run with `uv run pytest tests/ -v`.
+- End-to-end DNS blocking test: `./test_blocking.sh`.
+- When adding features, include tests where appropriate. For conditions, see `tests/test_conditions.py`.
 
 ## Commit & Pull Request Guidelines
 - Commit messages are short, imperative sentences (e.g., “Add Ubuntu/Linux compatibility”, “Fix Safari HTTPS bypass”).
@@ -39,6 +41,21 @@
 - Use the `block` wrapper in `/usr/local/bin` that `cd`s to the repo and runs `uv run ./block`; this ensures the correct config/state are used on both macOS and Ubuntu.
 - Auto-unlock may reapply unlocks on each check if conditions are met; disable `auto_unlock` temporarily when testing expiry behavior.
 - Phone/web caching can mask state changes briefly; force new DNS lookups when validating block/unblock.
+
+## Extending the Conditions System
+The `lib/conditions/` module uses a registry pattern for extensibility:
+
+1. **Create** `lib/conditions/yourtype.py` with a class that has `check(config) -> (bool, str)`
+2. **Register** using `@ConditionRegistry.register("yourtype")` decorator on a factory function
+3. **Import** in `lib/conditions/__init__.py` to trigger registration
+4. **Configure** in `config.yaml` with `type: yourtype`
+
+Key classes:
+- `ConditionRegistry` - registers and creates condition instances
+- `ConditionContext` - provides `vault_path`, `secrets`, `get_secret(path)`, `full_config`
+- `Condition` - protocol requiring `check(config) -> (bool, str)`
+
+Secrets for custom conditions go in `config.secrets.yaml` and are accessed via `context.get_secret("yourtype.api_key")`.
 
 ## Next Steps / Gotchas
 - If you test unlock expiry, consider temporarily disabling `auto_unlock` or shortening `emergency_duration` to observe the expiration without re-unlock.
