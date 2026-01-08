@@ -9,7 +9,6 @@ Usage:
     block unlock              Unlock via proof-of-work (check Obsidian conditions)
     block emergency           Emergency unlock with escalating wait times
     block on                  Force enable blocking
-    block off                 Temporarily disable blocking (for testing)
     block list                List blocked sites
     block add <site>          Add a site to the blocklist
     block remove <site>       Remove a site from the blocklist
@@ -137,28 +136,6 @@ def cmd_on(args):
         state_after=state.get_debug_snapshot(),
     )
     print(message)
-
-
-def cmd_off(args):
-    """Temporarily disable blocking (for testing)."""
-    config, state, hosts, obsidian, unlock, remote_sync = get_managers()
-    # This is a testing/setup command - just unblock without conditions
-    experiment = get_experiment_logger(config)
-    experiment.log_event(
-        "manual_block_off",
-        state_before=state.get_debug_snapshot(),
-        note=get_note_info(obsidian),
-    )
-    state.set_unlocked(3600)  # 1 hour for testing
-    hosts.unblock_sites()
-    # Sync to remote (unblock all)
-    if remote_sync.enabled:
-        remote_sync.sync([])
-    print("Blocking disabled for 1 hour (testing mode).")
-    experiment.log_event(
-        "manual_block_off_complete",
-        state_after=state.get_debug_snapshot(),
-    )
 
 
 def cmd_list(args):
@@ -295,9 +272,8 @@ def main():
     # Emergency command
     subparsers.add_parser("emergency", help="Emergency unlock with wait time")
 
-    # On/Off commands
+    # On command
     subparsers.add_parser("on", help="Force enable blocking")
-    subparsers.add_parser("off", help="Temporarily disable blocking")
 
     # List command
     subparsers.add_parser("list", help="List blocked sites")
@@ -331,7 +307,6 @@ def main():
         "unlock": cmd_unlock,
         "emergency": cmd_emergency,
         "on": cmd_on,
-        "off": cmd_off,
         "list": cmd_list,
         "add": cmd_add,
         "remove": cmd_remove,
