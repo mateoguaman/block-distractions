@@ -83,6 +83,17 @@ class BlockDaemon:
         }
         return {"state": snapshot, "remote_state": remote_info}
 
+    def sync_phone_status(self) -> None:
+        """Sync current status to phone API so UI shows accurate data."""
+        if not self.poll_manager.enabled:
+            return
+
+        try:
+            status = self.unlock_manager.get_status()
+            self.poll_manager.update_status(status)
+        except Exception as e:
+            logger.error(f"Error syncing phone status: {e}")
+
     def process_poll_requests(self) -> None:
         """Check for and process any pending phone unlock requests."""
         if not self.poll_manager.enabled:
@@ -271,6 +282,9 @@ class BlockDaemon:
                 hosts_blocking=self.hosts.is_blocking_active(),
                 **self._state_context(),
             )
+
+            # Sync status to phone API every cycle
+            self.sync_phone_status()
 
         except Exception as e:
             logger.error(f"Error during check: {e}")
