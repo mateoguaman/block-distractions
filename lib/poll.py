@@ -135,22 +135,24 @@ class PollManager:
             return False
 
         requests_file = f"{self.data_dir}/requests.json"
-        result_json = json.dumps(result).replace("'", "'\"'\"'")
+        # Base64 encode the result to avoid shell escaping issues
+        import base64
+        result_b64 = base64.b64encode(json.dumps(result).encode()).decode()
         completed_at = time.time()
 
         # Use a Python one-liner to update the request in place
         python_script = f"""
-import json
+import json, base64
 try:
+    result = json.loads(base64.b64decode('{result_b64}').decode())
     with open('{requests_file}', 'r') as f:
         requests = json.load(f)
     for r in requests:
         if r['id'] == '{request_id}':
             r['status'] = 'completed'
-            r['result'] = {result_json}
+            r['result'] = result
             r['completed_at'] = {completed_at}
             break
-    # Keep only pending + last 10 completed
     completed = [r for r in requests if r.get('status') == 'completed']
     pending = [r for r in requests if r.get('status') == 'pending']
     requests = pending + completed[-10:]
@@ -185,11 +187,11 @@ except Exception as e:
             return False
 
         status_file = f"{self.data_dir}/status.json"
-        status_json = json.dumps(status)
+        # Base64 encode to avoid shell escaping issues
+        import base64
+        status_b64 = base64.b64encode(json.dumps(status).encode()).decode()
 
-        # Escape for shell
-        status_json_escaped = status_json.replace("'", "'\"'\"'")
-        cmd = f"echo '{status_json_escaped}' > {status_file}"
+        cmd = f"python3 -c \"import base64; print(base64.b64decode('{status_b64}').decode())\" > {status_file}"
 
         success, output = self._run_ssh(cmd, "update status")
         if not success:
