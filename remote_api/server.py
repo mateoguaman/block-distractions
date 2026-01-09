@@ -73,155 +73,231 @@ MOBILE_PAGE = """
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Block Distractions</title>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <style>
-        * { box-sizing: border-box; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            max-width: 400px;
-            margin: 0 auto;
-            padding: 20px;
-            background: #1a1a2e;
-            color: #eee;
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro', sans-serif;
+            max-width: 100%;
+            padding: 24px 20px;
+            background: linear-gradient(180deg, #0f0f1a 0%, #1a1a2e 100%);
+            color: #fff;
             min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
         }
-        h1 { text-align: center; margin-bottom: 30px; }
-        .status-box {
-            background: #16213e;
-            border-radius: 12px;
+        .container { max-width: 380px; margin: 0 auto; }
+
+        /* Status badge */
+        .status-badge {
+            text-align: center;
+            padding: 32px 20px;
+            margin-bottom: 24px;
+        }
+        .status-badge h1 {
+            font-size: 14px;
+            font-weight: 500;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            margin-bottom: 12px;
+        }
+        .status-main {
+            font-size: 42px;
+            font-weight: 700;
+            letter-spacing: -1px;
+        }
+        .status-main.blocked { color: #ff6b6b; }
+        .status-main.unlocked { color: #51cf66; }
+        .status-sub {
+            font-size: 15px;
+            color: #888;
+            margin-top: 8px;
+        }
+
+        /* Info card */
+        .card {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(255,255,255,0.06);
+            border-radius: 16px;
             padding: 20px;
-            margin-bottom: 20px;
+            margin-bottom: 16px;
         }
-        .status-row {
+        .card-row {
             display: flex;
             justify-content: space-between;
-            padding: 8px 0;
-            border-bottom: 1px solid #0f3460;
+            align-items: center;
+            padding: 12px 0;
         }
-        .status-row:last-child { border-bottom: none; }
-        .label { color: #888; }
-        .value { font-weight: 600; }
-        .blocked { color: #e74c3c; }
-        .unlocked { color: #2ecc71; }
-        .btn {
-            display: block;
-            width: 100%;
-            padding: 16px;
-            margin: 10px 0;
-            border: none;
-            border-radius: 12px;
-            font-size: 18px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.1s, opacity 0.1s;
+        .card-row:not(:last-child) {
+            border-bottom: 1px solid rgba(255,255,255,0.06);
         }
-        .btn:active { transform: scale(0.98); }
-        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .btn-unlock {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-        }
-        .btn-emergency {
-            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-            color: white;
-        }
-        .btn-refresh {
-            background: #16213e;
-            color: #888;
-            border: 1px solid #0f3460;
-        }
-        .message {
-            text-align: center;
-            padding: 15px;
-            border-radius: 8px;
-            margin: 15px 0;
-            display: none;
-        }
-        .message.show { display: block; }
-        .message.success { background: #2ecc71; color: white; }
-        .message.error { background: #e74c3c; color: white; }
-        .message.pending { background: #f39c12; color: white; }
-        .pending-indicator {
-            display: none;
-            text-align: center;
-            padding: 10px;
-            color: #f39c12;
-        }
-        .pending-indicator.show { display: block; }
-        .conditions {
-            margin-top: 15px;
-            padding-top: 15px;
-            border-top: 1px solid #0f3460;
+        .card-label { color: #888; font-size: 14px; }
+        .card-value { font-weight: 600; font-size: 15px; }
+
+        /* Conditions */
+        .conditions-title {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 12px;
         }
         .condition {
             display: flex;
-            align-items: center;
-            padding: 6px 0;
+            align-items: flex-start;
+            padding: 10px 0;
+            font-size: 14px;
+            color: #aaa;
         }
-        .condition-icon { margin-right: 10px; font-size: 16px; }
-        .condition-met { color: #2ecc71; }
-        .condition-unmet { color: #e74c3c; }
-        .login-box {
-            background: #16213e;
+        .condition-icon {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 12px;
+            flex-shrink: 0;
+            font-size: 12px;
+        }
+        .condition-icon.met { background: rgba(81, 207, 102, 0.2); color: #51cf66; }
+        .condition-icon.unmet { background: rgba(255, 107, 107, 0.2); color: #ff6b6b; }
+
+        /* Buttons */
+        .btn {
+            display: block;
+            width: 100%;
+            padding: 18px;
+            margin: 8px 0;
+            border: none;
+            border-radius: 14px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .btn:active { transform: scale(0.98); opacity: 0.9; }
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .btn-danger {
+            background: transparent;
+            color: #ff6b6b;
+            border: 1px solid rgba(255, 107, 107, 0.3);
+        }
+        .btn-secondary {
+            background: transparent;
+            color: #666;
+            font-weight: 500;
+            font-size: 14px;
+            padding: 14px;
+        }
+        .btn-secondary:active { background: rgba(255,255,255,0.03); }
+
+        /* Toast message */
+        .toast {
+            position: fixed;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            background: #333;
+            color: #fff;
+            padding: 14px 24px;
             border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 20px;
+            font-size: 14px;
+            font-weight: 500;
+            opacity: 0;
+            transition: all 0.3s ease;
+            pointer-events: none;
+            z-index: 100;
+        }
+        .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+        .toast.success { background: #51cf66; }
+        .toast.error { background: #ff6b6b; }
+        .toast.pending { background: #fcc419; color: #000; }
+
+        /* Login */
+        .login-box {
+            padding: 40px 20px;
+            text-align: center;
+        }
+        .login-box h2 {
+            font-size: 24px;
+            margin-bottom: 8px;
+        }
+        .login-box p {
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 24px;
         }
         .login-box input {
             width: 100%;
-            padding: 12px;
-            border: 1px solid #0f3460;
-            border-radius: 8px;
-            background: #1a1a2e;
-            color: #eee;
+            padding: 16px;
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            background: rgba(255,255,255,0.03);
+            color: #fff;
             font-size: 16px;
-            margin-bottom: 10px;
+            margin-bottom: 12px;
+            text-align: center;
         }
-        .login-box input::placeholder { color: #666; }
-        .hidden { display: none; }
+        .login-box input::placeholder { color: #444; }
+        .login-box input:focus { outline: none; border-color: #667eea; }
+
+        .hidden { display: none !important; }
+        .updated { font-size: 11px; color: #444; text-align: center; margin-top: 20px; }
     </style>
 </head>
 <body>
-    <h1>Block Distractions</h1>
-
-    <div class="login-box" id="login-box">
-        <input type="password" id="token-input" placeholder="Enter auth token">
-        <button class="btn btn-unlock" onclick="saveToken()">Save Token</button>
-    </div>
-
-    <div id="main-content" class="hidden">
-        <div class="status-box" id="status-box">
-            <div class="status-row">
-                <span class="label">Status</span>
-                <span class="value" id="status-value">Loading...</span>
-            </div>
-            <div class="status-row">
-                <span class="label">Remaining</span>
-                <span class="value" id="remaining-value">--</span>
-            </div>
-            <div class="status-row">
-                <span class="label">Emergency</span>
-                <span class="value" id="emergency-value">--</span>
-            </div>
-            <div class="conditions" id="conditions"></div>
+    <div class="container">
+        <div class="login-box" id="login-box">
+            <h2>Block Distractions</h2>
+            <p>Enter your auth token to continue</p>
+            <input type="password" id="token-input" placeholder="Auth token">
+            <button class="btn btn-primary" onclick="saveToken()">Continue</button>
         </div>
 
-        <div class="message" id="message"></div>
-        <div class="pending-indicator" id="pending">Request pending... waiting for daemon</div>
+        <div id="main-content" class="hidden">
+            <div class="status-badge">
+                <h1>Current Status</h1>
+                <div class="status-main" id="status-value">--</div>
+                <div class="status-sub" id="status-sub"></div>
+            </div>
 
-        <button class="btn btn-unlock" id="btn-unlock" onclick="requestUnlock()">
-            Unlock (Check Conditions)
-        </button>
+            <div class="card">
+                <div class="card-row">
+                    <span class="card-label">Emergency unlocks</span>
+                    <span class="card-value" id="emergency-value">--</span>
+                </div>
+            </div>
 
-        <button class="btn btn-emergency" id="btn-emergency" onclick="requestEmergency()">
-            Emergency Unlock
-        </button>
+            <div class="card" id="conditions-card">
+                <div class="conditions-title">Conditions</div>
+                <div id="conditions"></div>
+            </div>
 
-        <button class="btn btn-refresh" onclick="loadStatus()">
-            Refresh Status
-        </button>
+            <button class="btn btn-primary" id="btn-unlock" onclick="requestUnlock()">
+                Check Conditions & Unlock
+            </button>
+
+            <button class="btn btn-danger" id="btn-emergency" onclick="requestEmergency()">
+                Emergency Unlock
+            </button>
+
+            <button class="btn btn-secondary" onclick="loadStatus()">
+                Refresh
+            </button>
+
+            <div class="updated" id="updated"></div>
+        </div>
     </div>
+
+    <div class="toast" id="toast"></div>
 
     <script>
         let AUTH_TOKEN = localStorage.getItem('block_auth_token') || '';
@@ -255,99 +331,96 @@ MOBILE_PAGE = """
         async function loadStatus() {
             try {
                 const res = await fetch('/status', {headers: headers()});
+                if (res.status === 401) {
+                    localStorage.removeItem('block_auth_token');
+                    AUTH_TOKEN = '';
+                    checkAuth();
+                    return;
+                }
                 const data = await res.json();
 
                 const statusEl = document.getElementById('status-value');
-                if (data.is_blocked) {
+                const subEl = document.getElementById('status-sub');
+
+                if (data.blocked) {
                     statusEl.textContent = 'BLOCKED';
-                    statusEl.className = 'value blocked';
+                    statusEl.className = 'status-main blocked';
+                    subEl.textContent = 'Complete conditions to unlock';
                 } else {
                     statusEl.textContent = 'UNLOCKED';
-                    statusEl.className = 'value unlocked';
+                    statusEl.className = 'status-main unlocked';
+                    subEl.textContent = data.unlock_remaining ? data.unlock_remaining + ' remaining' : '';
                 }
 
-                document.getElementById('remaining-value').textContent =
-                    data.unlock_remaining_formatted || '--';
                 document.getElementById('emergency-value').textContent =
-                    data.emergency_remaining + ' remaining';
+                    (data.emergency_remaining !== undefined ? data.emergency_remaining : '3') + ' left today';
 
                 // Render conditions
                 const condEl = document.getElementById('conditions');
                 if (data.conditions && data.conditions.length > 0) {
                     condEl.innerHTML = data.conditions.map(c => `
                         <div class="condition">
-                            <span class="condition-icon ${c.met ? 'condition-met' : 'condition-unmet'}">
+                            <span class="condition-icon ${c.met ? 'met' : 'unmet'}">
                                 ${c.met ? '&#10003;' : '&#10007;'}
                             </span>
-                            <span>${c.name}: ${c.description}</span>
+                            <span><strong>${c.name}</strong>: ${c.description}</span>
                         </div>
                     `).join('');
+                } else {
+                    document.getElementById('conditions-card').classList.add('hidden');
                 }
 
-                // Check for pending requests
-                checkPending();
+                document.getElementById('updated').textContent =
+                    'Updated ' + new Date().toLocaleTimeString();
             } catch (e) {
                 console.error('Failed to load status:', e);
             }
         }
 
-        async function checkPending() {
-            try {
-                const res = await fetch('/pending', {headers: headers()});
-                const data = await res.json();
-                const pending = data.requests && data.requests.length > 0;
-                document.getElementById('pending').classList.toggle('show', pending);
-            } catch (e) {}
-        }
-
-        function showMessage(text, type) {
-            const el = document.getElementById('message');
+        function showToast(text, type) {
+            const el = document.getElementById('toast');
             el.textContent = text;
-            el.className = 'message show ' + type;
-            setTimeout(() => el.classList.remove('show'), 5000);
+            el.className = 'toast show ' + type;
+            setTimeout(() => el.classList.remove('show'), 3000);
         }
 
         async function requestUnlock() {
             try {
-                const res = await fetch('/unlock', {
-                    method: 'POST',
-                    headers: headers()
-                });
+                const res = await fetch('/unlock', { method: 'POST', headers: headers() });
                 const data = await res.json();
                 if (data.error) {
-                    showMessage(data.error, 'error');
+                    showToast(data.error, 'error');
                 } else {
-                    showMessage('Unlock request queued!', 'pending');
-                    document.getElementById('pending').classList.add('show');
+                    showToast('Request sent! Checking...', 'pending');
+                    // Poll for completion
+                    setTimeout(loadStatus, 5000);
+                    setTimeout(loadStatus, 15000);
+                    setTimeout(loadStatus, 30000);
                 }
             } catch (e) {
-                showMessage('Request failed', 'error');
+                showToast('Request failed', 'error');
             }
         }
 
         async function requestEmergency() {
-            if (!confirm('Use an emergency unlock?')) return;
+            if (!confirm('Use 1 of your emergency unlocks?')) return;
             try {
-                const res = await fetch('/emergency', {
-                    method: 'POST',
-                    headers: headers()
-                });
+                const res = await fetch('/emergency', { method: 'POST', headers: headers() });
                 const data = await res.json();
                 if (data.error) {
-                    showMessage(data.error, 'error');
+                    showToast(data.error, 'error');
                 } else {
-                    showMessage('Emergency unlock queued!', 'pending');
-                    document.getElementById('pending').classList.add('show');
+                    showToast('Emergency request sent!', 'pending');
+                    setTimeout(loadStatus, 5000);
+                    setTimeout(loadStatus, 15000);
+                    setTimeout(loadStatus, 30000);
                 }
             } catch (e) {
-                showMessage('Request failed', 'error');
+                showToast('Request failed', 'error');
             }
         }
 
-        // Check auth and load status on page load
         checkAuth();
-
-        // Auto-refresh every 30 seconds
         setInterval(() => { if (AUTH_TOKEN) loadStatus(); }, 30000);
     </script>
 </body>
