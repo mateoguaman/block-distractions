@@ -36,6 +36,9 @@ class RemoteStateStore:
         if use_sudo is None:
             use_sudo = self.state_path.startswith(("/etc/", "/var/"))
         self.use_sudo = bool(use_sudo)
+        # Track whether the last load_state() succeeded - used to block saves
+        # that might overwrite remote state with empty/stale data
+        self._load_succeeded = False
 
     def is_configured(self) -> bool:
         """Return True if remote state is enabled and has host/user."""
@@ -74,8 +77,13 @@ class RemoteStateStore:
         return False, "", last_error
 
     def load_state(self) -> dict[str, Any]:
-        """Load state JSON from the remote host."""
+        """Load state JSON from the remote host.
+
+        Sets _load_succeeded to True only if SSH connection worked.
+        This is used to block saves when we couldn't verify the current remote state.
+        """
         if not self.is_configured():
+            self._load_succeeded = True  # Local-only mode, saves are fine
             return {}
 
         remote = f"{self.user}@{self.host}"
@@ -88,7 +96,11 @@ class RemoteStateStore:
         success, stdout, error = self._run_with_retry(cmd, "load")
         if not success:
             logger.error(f"Failed to load remote state: {error}")
+            self._load_succeeded = False
             return {}
+
+        # SSH worked - even if file is empty/missing, we can safely save later
+        self._load_succeeded = True
 
         if not stdout.strip():
             return {}
@@ -122,10 +134,22 @@ class RemoteStateStore:
         logger.warning(f"Falling back to local date for remote state: {error}")
         return date.today().isoformat()
 
-    def save_state(self, state: dict[str, Any]) -> None:
-        """Save state JSON to the remote host."""
+    def save_state(self, state: dict[str, Any]) -> bool:
+        """Save state JSON to the remote host.
+
+        Returns True if save succeeded, False if blocked or failed.
+        Saves are blocked if the previous load_state() failed, to prevent
+        overwriting remote state with empty/stale data after network issues.
+        """
         if not self.is_configured():
-            return
+            return True
+
+        if not self._load_succeeded:
+            logger.warning(
+                "Save blocked: remote state load failed earlier. "
+                "State changes will not persist until remote is available."
+            )
+            return False
 
         temp_path = None
         remote = f"{self.user}@{self.host}"
@@ -140,7 +164,7 @@ class RemoteStateStore:
             )
             if not success:
                 logger.error(f"Failed to copy remote state: {error}")
-                return
+                return False
 
             sudo = "sudo " if self.use_sudo else ""
             cmd = [
@@ -159,6 +183,8 @@ class RemoteStateStore:
             success, _, error = self._run_with_retry(cmd, "save")
             if not success:
                 logger.error(f"Failed to save remote state: {error}")
+                return False
+            return True
         finally:
             if temp_path:
                 Path(temp_path).unlink(missing_ok=True)
@@ -181,6 +207,12 @@ class State:
         """Load state from file."""
         if self.remote_store:
             self._state = self.remote_store.load_state()
+            # Warn if we're in degraded mode (remote load failed)
+            if not self.remote_store._load_succeeded:
+                logger.warning(
+                    "Operating in degraded mode: remote state unavailable. "
+                    "State changes will not persist until remote is reachable."
+                )
         else:
             if self.state_path.exists():
                 with open(self.state_path, "r") as f:
@@ -202,7 +234,17 @@ class State:
             json.dump(self._state, f, indent=2)
 
     def _check_day_reset(self) -> None:
-        """Reset state if it's a new day."""
+        """Reset state if it's a new day.
+
+        Skips reset if state is empty AND remote load failed.
+        This prevents creating a fresh state that would overwrite valid remote data.
+        """
+        # If state is empty and remote load failed, don't reset - we'd
+        # create a fresh state that could overwrite real data when saved
+        if not self._state and self.remote_store and not self.remote_store._load_succeeded:
+            logger.debug("Skipping day reset check: remote load failed, state is empty")
+            return
+
         today = (
             self.remote_store.get_today_iso()
             if self.remote_store

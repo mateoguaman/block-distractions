@@ -431,3 +431,115 @@ class TestUnlockedViaConditionsToday:
         # State should be blocked but flag should still be True
         assert state.is_blocked is True
         assert state.unlocked_via_conditions_today is True
+
+
+class TestRemoteStateLoadFailure:
+    """Tests for handling remote state load failures.
+
+    These tests verify the fix for a bug where network failures during
+    remote state load would cause a state reset that overwrote valid
+    remote data when the network recovered.
+    """
+
+    def test_save_blocked_when_load_failed(self):
+        """save_state should be blocked when load_state failed."""
+        from lib.state import RemoteStateStore
+
+        store = RemoteStateStore({
+            "enabled": True,
+            "host": "example.com",
+            "user": "test",
+            "state_path": "/etc/block/state.json",
+        })
+
+        # Simulate failed load
+        store._load_succeeded = False
+
+        # Try to save - should return False and not raise
+        result = store.save_state({"date": "2026-01-08", "emergency_count": 0})
+        assert result is False
+
+    def test_save_allowed_when_load_succeeded(self):
+        """save_state should proceed when load_state succeeded."""
+        from lib.state import RemoteStateStore
+
+        store = RemoteStateStore({
+            "enabled": True,
+            "host": "example.com",
+            "user": "test",
+            "state_path": "/etc/block/state.json",
+        })
+
+        # Simulate successful load
+        store._load_succeeded = True
+
+        # Mock the actual SSH calls to avoid real network access
+        with patch.object(store, '_run_with_retry') as mock_retry:
+            mock_retry.return_value = (True, "", "")
+            result = store.save_state({"date": "2026-01-08", "emergency_count": 1})
+            # save_state was allowed to proceed (would have called SSH)
+            assert mock_retry.called
+
+    def test_day_reset_skipped_when_remote_load_failed(self):
+        """_check_day_reset should skip when remote load failed with empty state."""
+        from lib.state import State, RemoteStateStore
+
+        # Create a mock remote store that failed to load
+        mock_store = MagicMock(spec=RemoteStateStore)
+        mock_store.load_state.return_value = {}  # Empty state from failed load
+        mock_store._load_succeeded = False
+        mock_store.timezone = "America/Los_Angeles"
+
+        # Create state with the failing remote store
+        state = State(remote_store=mock_store)
+
+        # State should remain empty (no reset triggered)
+        assert state._state == {}
+
+        # get_today_iso should NOT have been called (reset was skipped)
+        mock_store.get_today_iso.assert_not_called()
+
+    def test_day_reset_proceeds_when_remote_load_succeeded(self):
+        """_check_day_reset should proceed normally when remote load succeeded."""
+        from lib.state import State, RemoteStateStore
+
+        # Create a mock remote store that successfully loaded empty state
+        mock_store = MagicMock(spec=RemoteStateStore)
+        mock_store.load_state.return_value = {}  # Empty but successful load
+        mock_store._load_succeeded = True  # Load succeeded
+        mock_store.timezone = "America/Los_Angeles"
+        mock_store.get_today_iso.return_value = date.today().isoformat()
+
+        # Create state with the successful remote store
+        state = State(remote_store=mock_store)
+
+        # State should have been initialized (reset triggered)
+        assert state._state.get("date") == date.today().isoformat()
+        assert state._state.get("emergency_count") == 0
+
+        # get_today_iso should have been called (reset proceeded)
+        mock_store.get_today_iso.assert_called()
+
+    def test_state_preserved_when_load_fails_after_valid_state(self):
+        """Emergency count should not be reset when network fails temporarily."""
+        from lib.state import State, RemoteStateStore
+
+        # Create a mock remote store that loaded valid state
+        mock_store = MagicMock(spec=RemoteStateStore)
+        mock_store.load_state.return_value = {
+            "date": date.today().isoformat(),
+            "tz": "America/Los_Angeles",
+            "emergency_count": 2,
+            "blocked": True,
+            "unlocked_until": 0,
+            "last_emergency_wait": 60,
+        }
+        mock_store._load_succeeded = True
+        mock_store.timezone = "America/Los_Angeles"
+        mock_store.get_today_iso.return_value = date.today().isoformat()
+
+        state = State(remote_store=mock_store)
+
+        # Verify emergency_count was preserved
+        assert state.emergency_count == 2
+        assert state._state.get("last_emergency_wait") == 60
