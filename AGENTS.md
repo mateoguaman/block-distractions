@@ -57,7 +57,31 @@ Key classes:
 
 Secrets for custom conditions go in `config.secrets.yaml` and are accessed via `context.get_secret("yourtype.api_key")`.
 
+## Phone Unlock API
+
+The `remote_api/` module provides phone-based unlock triggering:
+
+- `remote_api/server.py` - Flask server with mobile UI (runs on Google VM, port 8080)
+- `lib/poll.py` - `PollManager` class that polls VM for pending requests via SSH
+- Daemon integration in `lib/daemon.py` - `process_poll_requests()` runs each check cycle
+
+**Deployment:**
+```bash
+cd remote_api && ./deploy.sh user@VM_IP
+gcloud compute firewall-rules create allow-phone-api --allow=tcp:8080 --target-tags=phone-api --source-ranges=0.0.0.0/0
+```
+
+**Config:**
+```yaml
+phone_api:
+  enabled: true
+  data_dir: /var/lib/block_distractions
+```
+
+Auth token is generated during deployment and stored in the systemd service environment. Phone UI saves token in localStorage.
+
 ## Next Steps / Gotchas
 - If you test unlock expiry, consider temporarily disabling `auto_unlock` or shortening `emergency_duration` to observe the expiration without re-unlock.
 - Keep VM sudoers entries in sync with state/blocklist paths (`/etc/block_distractions/state.json`, `/etc/dnsmasq.d/blocklist.conf`).
 - VM timezone/`remote_state.timezone` matters for daily reset; set it to your preferred TZ if you want a specific rollover time.
+- Phone API latency is tied to daemon check interval (default 5 min). Reduce `auto_unlock.check_interval` for faster phone unlock response.

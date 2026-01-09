@@ -422,6 +422,92 @@ Edit `dns-blocker.mobileconfig` and replace the placeholders:
 
 ---
 
+## Phone Unlock API
+
+Trigger unlocks from your phone without terminal access. The daemon on boss polls the Google VM for unlock requests.
+
+```
+┌─────────────┐         ┌─────────────────┐         ┌─────────────┐
+│   iPhone    │  HTTP   │   Google VM     │   SSH   │    boss     │
+│             │ ──────► │  Flask server   │ ◄────── │  (daemon)   │
+│ tap unlock  │         │  :8080          │  polls  │             │
+└─────────────┘         └─────────────────┘         └─────────────┘
+```
+
+### Setup
+
+**1. Deploy the API to your Google VM:**
+
+```bash
+cd remote_api
+./deploy.sh YOUR_USER@YOUR_VM_IP
+# Example: ./deploy.sh mateo@34.127.22.131
+```
+
+If the deploy script fails (paths issue), SSH to the VM and fix manually:
+
+```bash
+gcloud compute ssh dns-server --zone=YOUR_ZONE
+
+# Create venv in correct location
+cd ~/block_distractions
+python3 -m venv venv
+source venv/bin/activate
+pip install flask gunicorn
+
+# Fix service paths if needed
+sudo sed -i 's|/root/|/home/YOUR_USER/|g' /etc/systemd/system/block-phone-api.service
+sudo systemctl daemon-reload
+sudo systemctl restart block-phone-api
+```
+
+**2. Open firewall port 8080:**
+
+```bash
+gcloud compute instances add-tags dns-server --zone=YOUR_ZONE --tags=phone-api
+gcloud compute firewall-rules create allow-phone-api \
+  --allow=tcp:8080 \
+  --target-tags=phone-api \
+  --source-ranges=0.0.0.0/0
+```
+
+**3. Update daemon on boss:**
+
+The daemon needs the new polling code. SSH to boss and update:
+
+```bash
+ssh boss.cs.washington.edu
+cd ~/block_distractions
+git pull
+systemctl --user restart block-daemon
+```
+
+**4. Enable in config.yaml:**
+
+```yaml
+phone_api:
+  enabled: true
+  data_dir: /var/lib/block_distractions
+```
+
+**5. Access from phone:**
+
+Open `http://YOUR_VM_IP:8080` in Safari. Enter the auth token shown during deployment (saved in localStorage, only needed once).
+
+### How It Works
+
+1. Phone hits the web UI → taps "Unlock" or "Emergency Unlock"
+2. Request queued in `/var/lib/block_distractions/requests.json` on VM
+3. Daemon on boss polls every 5 minutes via SSH
+4. Daemon processes request → runs `proof_of_work_unlock()` or `emergency_unlock()`
+5. Result stored, status updated, phone UI reflects change
+
+### Latency
+
+Requests are processed within the daemon's check interval (default 5 minutes). For faster response, reduce `auto_unlock.check_interval` in config.yaml.
+
+---
+
 ## Usage
 
 ```bash

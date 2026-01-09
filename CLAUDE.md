@@ -168,6 +168,38 @@ conditions:
 - macOS: `services/com.block.daemon.plist` - uses `{{SCRIPT_DIR}}`, `{{USER}}`, `{{HOME}}` placeholders
 - Linux: `services/block-daemon.service`
 
+### Phone Unlock API
+
+The `remote_api/` directory contains a Flask web server for phone-based unlocks:
+
+```
+remote_api/
+├── server.py         # Flask app with mobile-friendly UI
+├── deploy.sh         # One-command deployment to VM
+├── setup_vm.sh       # VM setup script
+└── requirements.txt  # Flask + gunicorn
+```
+
+**How it works:**
+1. Flask server runs on Google VM (port 8080)
+2. Phone accesses web UI, queues unlock requests
+3. Daemon on boss polls VM via SSH for pending requests
+4. `lib/poll.py` `PollManager` handles the polling logic
+5. Requests processed via existing `UnlockManager` methods
+
+**Key files:**
+- `lib/poll.py` - PollManager class (SSH-based polling)
+- `lib/daemon.py` - `process_poll_requests()` method
+- `lib/config.py` - `phone_api_settings` property
+
+**Config:**
+```yaml
+phone_api:
+  enabled: true
+  data_dir: /var/lib/block_distractions  # Where requests.json lives on VM
+  # host/user inherited from remote_sync
+```
+
 ## Configuration
 
 **config.yaml** (version controlled):

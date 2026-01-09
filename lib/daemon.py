@@ -14,6 +14,7 @@ from .hosts import get_hosts_manager, get_remote_sync_manager
 from .obsidian import get_obsidian_parser
 from .unlock import get_unlock_manager
 from .experiment import get_experiment_logger
+from .poll import get_poll_manager
 
 # Set up logging with rotation
 LOG_DIR = Path(__file__).parent.parent / ".logs"
@@ -56,6 +57,7 @@ class BlockDaemon:
             self.config, self.state, self.hosts, self.obsidian, self.remote_sync
         )
         self.experiment = get_experiment_logger(self.config)
+        self.poll_manager = get_poll_manager(self.config.phone_api_settings)
         self.running = False
 
     def _note_info(self) -> dict[str, object]:
@@ -80,6 +82,59 @@ class BlockDaemon:
             "use_sudo": remote.use_sudo if remote else False,
         }
         return {"state": snapshot, "remote_state": remote_info}
+
+    def process_poll_requests(self) -> None:
+        """Check for and process any pending phone unlock requests."""
+        if not self.poll_manager.enabled:
+            return
+
+        try:
+            pending = self.poll_manager.check_pending_requests()
+            if not pending:
+                return
+
+            for request in pending:
+                req_id = request.get("id", "unknown")
+                req_type = request.get("type", "")
+                logger.info(f"Processing phone request: {req_type} (id={req_id})")
+
+                result = {"success": False, "message": "Unknown request type"}
+
+                if req_type == "unlock":
+                    # Proof-of-work unlock (checks conditions)
+                    success, message = self.unlock_manager.proof_of_work_unlock()
+                    result = {"success": success, "message": message}
+                    if success:
+                        logger.info(f"Phone unlock successful: {message}")
+                    else:
+                        logger.info(f"Phone unlock failed: {message}")
+
+                elif req_type == "emergency":
+                    # Emergency unlock (non-interactive)
+                    success, message = self.unlock_manager.emergency_unlock(interactive=False)
+                    result = {"success": success, "message": message}
+                    if success:
+                        logger.info(f"Phone emergency unlock successful: {message}")
+                    else:
+                        logger.info(f"Phone emergency unlock failed: {message}")
+
+                # Mark the request as completed
+                self.poll_manager.mark_completed(req_id, result)
+
+                # Log the event
+                self.experiment.log_event(
+                    "phone_request_processed",
+                    request_id=req_id,
+                    request_type=req_type,
+                    result=result,
+                )
+
+            # Update the remote status so phone UI reflects changes
+            status = self.unlock_manager.get_status()
+            self.poll_manager.update_status(status)
+
+        except Exception as e:
+            logger.error(f"Error processing phone requests: {e}")
 
     def evaluate_auto_unlock(self) -> tuple[bool, dict[str, object]]:
         """Check if auto-unlock should happen now, with context."""
@@ -142,6 +197,12 @@ class BlockDaemon:
         """Run a single check cycle."""
         try:
             # Reload state from file to pick up changes from CLI
+            self.state.load()
+
+            # Check for phone unlock requests first (polling)
+            self.process_poll_requests()
+
+            # Reload state again in case phone request modified it
             self.state.load()
 
             pre_state = self._state_context()

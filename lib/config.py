@@ -81,6 +81,11 @@ DEFAULT_CONFIG = {
         "days": 3,
         "started_at": None,
     },
+    "phone_api": {
+        "enabled": False,
+        "data_dir": "/var/lib/block_distractions",
+        # host and user come from remote_sync or can be overridden
+    },
 }
 
 
@@ -204,6 +209,21 @@ class Config:
     def experiment_settings(self) -> dict[str, Any]:
         """Get experiment settings."""
         return self.get("experiment", {})
+
+    @property
+    def phone_api_settings(self) -> dict[str, Any]:
+        """Get phone API settings.
+
+        Inherits host/user from remote_sync if not explicitly set.
+        """
+        settings = self.get("phone_api", {}).copy()
+        # Inherit host/user from remote_sync if not set
+        remote = self.remote_sync_settings
+        if "host" not in settings and remote.get("host"):
+            settings["host"] = remote["host"]
+        if "user" not in settings and remote.get("user"):
+            settings["user"] = remote["user"]
+        return settings
 
     def add_blocked_site(self, site: str) -> None:
         """Add a site to the blocklist."""

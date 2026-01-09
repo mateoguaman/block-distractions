@@ -13,7 +13,7 @@ conditions:
 auto_unlock:
   enabled: true
   earliest_time: '17:00'
-  check_interval: 300
+  check_interval: 30  # Reduced for phone API testing (was 300)
 experiment:
   enabled: true
   days: 3
@@ -72,3 +72,6 @@ remote_state:
   lock_path: /tmp/block_distractions_state.lock
   use_sudo: true
   timezone: America/Los_Angeles
+phone_api:
+  enabled: true
+  data_dir: /var/lib/block_distractions
