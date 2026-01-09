@@ -1,5 +1,5 @@
 obsidian:
-  vault_path: /Users/mateo/Documents/mateo-md
+  # vault_path is set in config.secrets.yaml (machine-specific)
   daily_note_pattern: Daily/{date}.md
 conditions:
   workout:
