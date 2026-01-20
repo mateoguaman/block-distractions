@@ -9,15 +9,34 @@
 #      scp -r remote_api/ user@VM_IP:~/block_distractions/
 #   2. SSH to VM and run:
 #      cd ~/block_distractions/remote_api && sudo ./setup_vm.sh
+#
+# Options:
+#   --no-auth    Disable authentication (anyone with URL can access)
+#   BLOCK_AUTH_TOKEN=xxx  Set a specific auth token
 
 set -e
 
+# Parse arguments
+NO_AUTH=false
+for arg in "$@"; do
+    case $arg in
+        --no-auth)
+            NO_AUTH=true
+            shift
+            ;;
+    esac
+done
+
 echo "Setting up Block Distractions Phone API..."
+
+# Get actual user (not root when using sudo)
+ACTUAL_USER="${SUDO_USER:-$USER}"
+ACTUAL_HOME=$(getent passwd "$ACTUAL_USER" | cut -d: -f6)
 
 # Create data directory
 DATA_DIR="/var/lib/block_distractions"
 sudo mkdir -p "$DATA_DIR"
-sudo chown "$USER:$USER" "$DATA_DIR"
+sudo chown "$ACTUAL_USER:$ACTUAL_USER" "$DATA_DIR"
 
 # Initialize empty files
 echo "[]" > "$DATA_DIR/requests.json"
@@ -29,25 +48,38 @@ sudo apt-get update
 sudo apt-get install -y python3-pip python3-venv
 
 # Create virtual environment
-VENV_DIR="$HOME/block_distractions/venv"
+VENV_DIR="$ACTUAL_HOME/block_distractions/venv"
 python3 -m venv "$VENV_DIR"
 source "$VENV_DIR/bin/activate"
 pip install flask gunicorn
 
-# Generate a random auth token if not provided
-AUTH_TOKEN="${BLOCK_AUTH_TOKEN:-$(openssl rand -hex 16)}"
-echo ""
-echo "=============================================="
-echo "AUTH TOKEN: $AUTH_TOKEN"
-echo "=============================================="
-echo ""
-echo "Save this token! You'll need to:"
-echo "1. Add it to your phone's localStorage:"
-echo "   localStorage.setItem('block_auth_token', '$AUTH_TOKEN')"
-echo "2. Or add it to config.secrets.yaml:"
-echo "   phone_api:"
-echo "     auth_token: $AUTH_TOKEN"
-echo ""
+# Handle auth token
+if [ "$NO_AUTH" = true ]; then
+    AUTH_TOKEN=""
+    echo ""
+    echo "=============================================="
+    echo "AUTHENTICATION DISABLED"
+    echo "=============================================="
+    echo ""
+    echo "Anyone with the URL can access the API."
+    echo "Make sure this is only accessible on a private network!"
+    echo ""
+else
+    # Generate a random auth token if not provided
+    AUTH_TOKEN="${BLOCK_AUTH_TOKEN:-$(openssl rand -hex 16)}"
+    echo ""
+    echo "=============================================="
+    echo "AUTH TOKEN: $AUTH_TOKEN"
+    echo "=============================================="
+    echo ""
+    echo "Save this token! You'll need to:"
+    echo "1. Add it to your phone's localStorage:"
+    echo "   localStorage.setItem('block_auth_token', '$AUTH_TOKEN')"
+    echo "2. Or add it to config.secrets.yaml:"
+    echo "   phone_api:"
+    echo "     auth_token: $AUTH_TOKEN"
+    echo ""
+fi
 
 # Create systemd service
 SERVICE_FILE="/etc/systemd/system/block-phone-api.service"
@@ -58,8 +90,8 @@ After=network.target
 
 [Service]
 Type=simple
-User=$USER
-WorkingDirectory=$HOME/block_distractions/remote_api
+User=$ACTUAL_USER
+WorkingDirectory=$ACTUAL_HOME/block_distractions/remote_api
 Environment="BLOCK_DATA_DIR=$DATA_DIR"
 Environment="BLOCK_AUTH_TOKEN=$AUTH_TOKEN"
 ExecStart=$VENV_DIR/bin/gunicorn -b 0.0.0.0:8080 -w 2 server:app

@@ -301,25 +301,41 @@ MOBILE_PAGE = """
 
     <script>
         let AUTH_TOKEN = localStorage.getItem('block_auth_token') || '';
+        let AUTH_REQUIRED = true;
 
         function saveToken() {
             const token = document.getElementById('token-input').value.trim();
             if (token) {
                 localStorage.setItem('block_auth_token', token);
                 AUTH_TOKEN = token;
-                checkAuth();
+                showMainContent();
             }
         }
 
-        function checkAuth() {
-            if (AUTH_TOKEN) {
-                document.getElementById('login-box').classList.add('hidden');
-                document.getElementById('main-content').classList.remove('hidden');
-                loadStatus();
+        async function checkAuthRequired() {
+            try {
+                const res = await fetch('/auth-check');
+                const data = await res.json();
+                AUTH_REQUIRED = data.auth_required;
+            } catch (e) {
+                console.error('Failed to check auth requirement:', e);
+                AUTH_REQUIRED = true;
+            }
+
+            if (!AUTH_REQUIRED) {
+                showMainContent();
+            } else if (AUTH_TOKEN) {
+                showMainContent();
             } else {
                 document.getElementById('login-box').classList.remove('hidden');
                 document.getElementById('main-content').classList.add('hidden');
             }
+        }
+
+        function showMainContent() {
+            document.getElementById('login-box').classList.add('hidden');
+            document.getElementById('main-content').classList.remove('hidden');
+            loadStatus();
         }
 
         function headers() {
@@ -331,10 +347,10 @@ MOBILE_PAGE = """
         async function loadStatus() {
             try {
                 const res = await fetch('/status', {headers: headers()});
-                if (res.status === 401) {
+                if (res.status === 401 && AUTH_REQUIRED) {
                     localStorage.removeItem('block_auth_token');
                     AUTH_TOKEN = '';
-                    checkAuth();
+                    checkAuthRequired();
                     return;
                 }
                 const data = await res.json();
@@ -420,8 +436,8 @@ MOBILE_PAGE = """
             }
         }
 
-        checkAuth();
-        setInterval(() => { if (AUTH_TOKEN) loadStatus(); }, 30000);
+        checkAuthRequired();
+        setInterval(() => { if (!AUTH_REQUIRED || AUTH_TOKEN) loadStatus(); }, 30000);
     </script>
 </body>
 </html>
@@ -432,6 +448,12 @@ MOBILE_PAGE = """
 def index():
     """Serve the mobile-friendly web page."""
     return render_template_string(MOBILE_PAGE)
+
+
+@app.route("/auth-check")
+def auth_check():
+    """Check if authentication is required (public endpoint)."""
+    return jsonify({"auth_required": bool(AUTH_TOKEN)})
 
 
 @app.route("/status")

@@ -54,6 +54,9 @@ class UnlockManager:
         # Cache for condition instances (created lazily)
         self._conditions: dict[str, Condition] = {}
 
+        # Cache for last condition check results (to avoid re-checking on status sync)
+        self._cached_condition_results: list[tuple[str, bool, str]] | None = None
+
     def _get_condition(self, condition_type: str) -> Condition:
         """Get or create a condition instance by type.
 
@@ -132,6 +135,9 @@ class UnlockManager:
         else:
             # OR logic (default): any condition met is sufficient
             conditions_satisfied = any(met for _, met, _ in results)
+
+        # Cache results for status reporting (avoid re-checking on every status sync)
+        self._cached_condition_results = results
 
         return conditions_satisfied, results
 
@@ -247,12 +253,32 @@ class UnlockManager:
         self.hosts.sync_with_config(self.config.blocked_sites, should_block)
         self._sync_remote()
 
-    def get_status(self) -> dict[str, Any]:
-        """Get current status."""
+    def get_status(self, use_cached_conditions: bool = True) -> dict[str, Any]:
+        """Get current status.
+
+        Args:
+            use_cached_conditions: If True, use cached condition results when available
+                instead of re-checking. This avoids issues when the vault isn't accessible
+                during status sync (e.g., daemon running on remote server).
+        """
         status = self.state.get_status()
 
-        # Add condition status
-        _, conditions = self.check_all_conditions()
+        # Add condition status - use cached results if available and requested
+        # This avoids re-checking conditions on every status sync, which can fail
+        # if the vault isn't accessible (e.g., daemon on remote server)
+        if use_cached_conditions and self._cached_condition_results is not None:
+            conditions = self._cached_condition_results
+        elif use_cached_conditions and not status.get("blocked", True):
+            # We're unlocked but have no cache - don't re-check, just show placeholder
+            # This happens after daemon restart when we're already unlocked
+            conditions = [
+                (name, True, "Conditions met (cached)")
+                for name in self.config.conditions.keys()
+            ]
+        else:
+            # Either not using cache, or we're blocked and need fresh check
+            _, conditions = self.check_all_conditions()
+
         status["conditions"] = [
             {"name": name, "met": met, "description": desc}
             for name, met, desc in conditions
