@@ -91,7 +91,7 @@ The system runs across three types of machines:
 
 ### Core Flow
 
-1. **Blocking**: `lib/hosts.py` `RemoteSyncManager` syncs blocklist to remote dnsmasq server using `address=/domain/` format which blocks ALL DNS record types (A, AAAA, HTTPS, SVCB).
+1. **Blocking**: `lib/hosts.py` `RemoteSyncManager` syncs blocklist to remote dnsmasq server using `address=/domain/` format which blocks ALL DNS record types (A, AAAA, HTTPS, SVCB). The local `HostsManager` class is a no-op stub since local `/etc/hosts` blocking doesn't work for Safari. No local sudo is required for any `block` commands.
 
 2. **State**: `lib/state.py` tracks daily state in `state.json` - unlock expiration timestamps, emergency unlock count, auto-resets on new day.
 

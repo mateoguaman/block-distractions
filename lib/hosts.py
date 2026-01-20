@@ -1,4 +1,10 @@
-"""Hosts file management for blocking sites."""
+"""Hosts file management for blocking sites.
+
+NOTE: Local /etc/hosts blocking is disabled because Safari bypasses it via
+HTTPS DNS records (RFC 9460). Actual blocking is done via remote dnsmasq
+using the RemoteSyncManager class below. The HostsManager class remains as
+a no-op stub for interface compatibility.
+"""
 
 import logging
 import subprocess
@@ -8,185 +14,46 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-HOSTS_FILE = Path("/etc/hosts")
-BEGIN_MARKER = "# BEGIN BLOCK_DISTRACTIONS"
-END_MARKER = "# END BLOCK_DISTRACTIONS"
-BLOCK_IP = "127.0.0.1"
-
 
 class HostsManager:
-    """Manages the /etc/hosts file for blocking sites."""
+    """No-op stub for local hosts file management.
+
+    Local /etc/hosts blocking doesn't work for Safari (which uses HTTPS DNS
+    records with IP hints that bypass hosts file). Actual blocking is handled
+    by RemoteSyncManager syncing to a remote dnsmasq server.
+
+    This class remains for interface compatibility but does nothing.
+    """
 
     def __init__(self, hosts_path: Path | str | None = None):
-        self.hosts_path = Path(hosts_path) if hosts_path else HOSTS_FILE
-
-    def _read_hosts(self) -> str:
-        """Read the current hosts file content."""
-        if self.hosts_path.exists():
-            return self.hosts_path.read_text()
-        return ""
-
-    def _write_hosts(self, content: str) -> bool:
-        """Write content to hosts file using sudo."""
-        try:
-            # Write to a temp file first
-            with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".hosts") as f:
-                f.write(content)
-                temp_path = f.name
-
-            # Use sudo to copy the temp file to /etc/hosts
-            result = subprocess.run(
-                ["sudo", "cp", temp_path, str(self.hosts_path)],
-                capture_output=True,
-                text=True,
-            )
-
-            # Clean up temp file
-            Path(temp_path).unlink(missing_ok=True)
-
-            if result.returncode != 0:
-                print(f"Error updating hosts file: {result.stderr}")
-                return False
-
-            # Flush DNS cache
-            self._flush_dns_cache()
-            return True
-
-        except Exception as e:
-            print(f"Error updating hosts file: {e}")
-            return False
-
-    def _flush_dns_cache(self) -> None:
-        """Flush the DNS cache (platform-specific)."""
-        import platform
-
-        system = platform.system()
-
-        try:
-            if system == "Darwin":  # macOS
-                subprocess.run(
-                    ["sudo", "dscacheutil", "-flushcache"],
-                    capture_output=True,
-                )
-                # Use -9 to force restart mDNSResponder (HUP doesn't always reload hosts)
-                subprocess.run(
-                    ["sudo", "killall", "-9", "mDNSResponder"],
-                    capture_output=True,
-                )
-            elif system == "Linux":
-                # Try resolvectl first (Ubuntu 20.04+), fall back to systemd-resolve
-                result = subprocess.run(
-                    ["sudo", "resolvectl", "flush-caches"],
-                    capture_output=True,
-                )
-                if result.returncode != 0:
-                    subprocess.run(
-                        ["sudo", "systemd-resolve", "--flush-caches"],
-                        capture_output=True,
-                    )
-        except Exception:
-            pass  # DNS flush is best-effort
-
-    def _get_block_entries(self, sites: list[str]) -> str:
-        """Generate hosts file entries for blocking sites."""
-        lines = [BEGIN_MARKER]
-        for site in sites:
-            # Add both IPv4 and IPv6 blocking for each domain
-            # IPv6 is needed because some sites have AAAA records and Safari prefers IPv6
-            lines.append(f"{BLOCK_IP} {site}")
-            lines.append(f"::1 {site}")
-            if not site.startswith("www."):
-                lines.append(f"{BLOCK_IP} www.{site}")
-                lines.append(f"::1 www.{site}")
-        lines.append(END_MARKER)
-        return "\n".join(lines)
-
-    def _remove_block_section(self, content: str) -> str:
-        """Remove the block section from hosts content."""
-        lines = content.split("\n")
-        result = []
-        in_block = False
-
-        for line in lines:
-            if line.strip() == BEGIN_MARKER:
-                in_block = True
-                continue
-            if line.strip() == END_MARKER:
-                in_block = False
-                continue
-            if not in_block:
-                result.append(line)
-
-        # Remove trailing empty lines
-        while result and result[-1].strip() == "":
-            result.pop()
-
-        return "\n".join(result)
+        pass
 
     def get_blocked_sites(self) -> list[str]:
-        """Get list of currently blocked sites from hosts file."""
-        content = self._read_hosts()
-        sites = []
-        in_block = False
-
-        for line in content.split("\n"):
-            if line.strip() == BEGIN_MARKER:
-                in_block = True
-                continue
-            if line.strip() == END_MARKER:
-                in_block = False
-                continue
-            if in_block and line.strip():
-                parts = line.split()
-                if len(parts) >= 2 and parts[0] == BLOCK_IP:
-                    site = parts[1]
-                    if not site.startswith("www."):
-                        sites.append(site)
-
-        return sites
+        """Return empty list - local hosts not used."""
+        return []
 
     def is_blocking_active(self) -> bool:
-        """Check if blocking is currently active in hosts file."""
-        content = self._read_hosts()
-        return BEGIN_MARKER in content
+        """Return False - local hosts not used."""
+        return False
 
     def block_sites(self, sites: list[str]) -> bool:
-        """Block the given sites in the hosts file."""
-        current_content = self._read_hosts()
-
-        # Build new content
-        base_content = self._remove_block_section(current_content)
-        if base_content and not base_content.endswith("\n"):
-            base_content += "\n"
-        new_content = base_content + "\n" + self._get_block_entries(sites) + "\n"
-
-        # Only write if content actually changed (avoid unnecessary DNS flushes)
-        if new_content.strip() == current_content.strip():
-            return True  # Already up to date
-
-        return self._write_hosts(new_content)
+        """No-op - blocking handled by RemoteSyncManager."""
+        logger.debug(f"HostsManager.block_sites called (no-op): {len(sites)} sites")
+        return True
 
     def unblock_sites(self) -> bool:
-        """Remove all site blocks from hosts file."""
-        content = self._read_hosts()
-        content = self._remove_block_section(content)
-
-        # Ensure proper ending
-        if content and not content.endswith("\n"):
-            content += "\n"
-
-        return self._write_hosts(content)
+        """No-op - blocking handled by RemoteSyncManager."""
+        logger.debug("HostsManager.unblock_sites called (no-op)")
+        return True
 
     def sync_with_config(self, sites: list[str], should_block: bool) -> bool:
-        """Sync hosts file with desired state."""
-        if should_block:
-            return self.block_sites(sites)
-        else:
-            return self.unblock_sites()
+        """No-op - blocking handled by RemoteSyncManager."""
+        logger.debug(f"HostsManager.sync_with_config called (no-op): should_block={should_block}")
+        return True
 
 
 def get_hosts_manager(hosts_path: Path | str | None = None) -> HostsManager:
-    """Get a HostsManager instance."""
+    """Get a HostsManager instance (no-op stub)."""
     return HostsManager(hosts_path)
 
 

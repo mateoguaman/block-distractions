@@ -48,38 +48,12 @@ OS=$(uname -s)
 echo
 echo "Detected OS: $OS"
 
-# Set up passwordless sudo for hosts file modification
-echo
-echo "Setting up passwordless sudo for /etc/hosts..."
+# NOTE: Local sudo is no longer needed - blocking is handled by remote dnsmasq.
+# Remove any old sudoers file from previous installations.
 SUDOERS_FILE="/etc/sudoers.d/block-distractions"
-
-if [ "$OS" = "Darwin" ]; then
-    # macOS sudoers rules
-    SUDOERS_CONTENT="# Block Distractions - passwordless sudo for hosts file
-$USER ALL=(ALL) NOPASSWD: /bin/cp * /etc/hosts
-$USER ALL=(ALL) NOPASSWD: /usr/bin/dscacheutil -flushcache
-$USER ALL=(ALL) NOPASSWD: /usr/bin/killall -HUP mDNSResponder
-"
-elif [ "$OS" = "Linux" ]; then
-    # Linux sudoers rules (include both resolvectl and systemd-resolve for compatibility)
-    SUDOERS_CONTENT="# Block Distractions - passwordless sudo for hosts file
-$USER ALL=(ALL) NOPASSWD: /bin/cp * /etc/hosts
-$USER ALL=(ALL) NOPASSWD: /usr/bin/resolvectl flush-caches
-$USER ALL=(ALL) NOPASSWD: /usr/bin/systemd-resolve --flush-caches
-"
-fi
-
-# Create sudoers file with correct permissions
-echo "$SUDOERS_CONTENT" | sudo tee "$SUDOERS_FILE" > /dev/null
-sudo chmod 440 "$SUDOERS_FILE"
-
-# Validate sudoers file
-if sudo visudo -c -f "$SUDOERS_FILE" 2>/dev/null; then
-    echo "Passwordless sudo configured: $SUDOERS_FILE"
-else
-    echo "Warning: sudoers file validation failed. Removing..."
-    sudo rm -f "$SUDOERS_FILE"
-    echo "You may need to enter your password for block/unlock commands."
+if [ -f "$SUDOERS_FILE" ]; then
+    echo "Removing old sudoers file (no longer needed)..."
+    sudo rm -f "$SUDOERS_FILE" 2>/dev/null || true
 fi
 
 if [ "$OS" = "Darwin" ]; then
