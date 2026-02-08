@@ -265,11 +265,13 @@ class BlockDaemon:
                 if self._last_blocked_state != current_blocked:
                     if current_blocked:
                         sites = self._get_blocked_sites()
-                        logger.info("Blocking state changed to BLOCKED, syncing...")
+                        logger.info(f"Blocking state changed to BLOCKED, syncing {len(sites)} sites...")
                         self.hosts.block_sites(sites)
                         if self.remote_sync.enabled:
                             success, msg = self.remote_sync.sync(sites)
-                            if not success:
+                            if success:
+                                logger.info(f"Remote sync OK: {msg}")
+                            else:
                                 logger.error(f"Remote sync failed during re-block: {msg}")
                         action = "reblock"
                     else:
@@ -277,7 +279,9 @@ class BlockDaemon:
                         self.hosts.unblock_sites()
                         if self.remote_sync.enabled:
                             success, msg = self.remote_sync.sync([])
-                            if not success:
+                            if success:
+                                logger.info(f"Remote sync OK (unblock): {msg}")
+                            else:
                                 logger.error(f"Remote sync failed during unblock: {msg}")
                         action = "unblock"
                     self._last_blocked_state = current_blocked

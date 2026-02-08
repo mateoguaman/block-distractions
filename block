@@ -153,15 +153,17 @@ def cmd_list(args):
 def cmd_sync(args):
     """Sync blocklist to remote DNS server."""
     config = get_config()
+    state = get_state(config)
+    sites = state.blocked_sites or config.blocked_sites
     remote_sync = get_remote_sync_manager(config.remote_sync_settings)
 
-    success, message = remote_sync.sync(config.blocked_sites)
+    success, message = remote_sync.sync(sites)
     experiment = get_experiment_logger(config)
     experiment.log_event(
         "manual_sync",
         success=success,
         message=message,
-        blocked_sites_count=len(config.blocked_sites),
+        blocked_sites_count=len(sites),
     )
     print(message)
     return 0 if success else 1
