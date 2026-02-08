@@ -256,6 +256,7 @@ class State:
             else "local"
         )
         if self._state.get("date") != today or self._state.get("tz") != current_tz:
+            preserved_blocked_sites = self._state.get("blocked_sites")
             self._state = {
                 "date": today,
                 "tz": current_tz,
@@ -265,6 +266,8 @@ class State:
                 "blocked": True,
                 "unlocked_via_conditions_today": False,
             }
+            if preserved_blocked_sites is not None:
+                self._state["blocked_sites"] = preserved_blocked_sites
             self.save()
 
     @property
@@ -340,6 +343,32 @@ class State:
         self._check_day_reset()
         self._state["unlocked_via_conditions_today"] = True
         self.save()
+
+    @property
+    def blocked_sites(self) -> list[str] | None:
+        """Get the centralized blocklist, or None if not yet initialized."""
+        return self._state.get("blocked_sites")
+
+    def set_blocked_sites(self, sites: list[str]) -> None:
+        """Set the full blocklist."""
+        self._state["blocked_sites"] = sites
+        self.save()
+
+    def add_blocked_site(self, site: str) -> None:
+        """Add a site to the blocklist."""
+        sites = self._state.get("blocked_sites", [])
+        if site not in sites:
+            sites.append(site)
+            self._state["blocked_sites"] = sites
+            self.save()
+
+    def remove_blocked_site(self, site: str) -> None:
+        """Remove a site from the blocklist."""
+        sites = self._state.get("blocked_sites", [])
+        if site in sites:
+            sites.remove(site)
+            self._state["blocked_sites"] = sites
+            self.save()
 
     def set_unlocked(self, duration_seconds: int) -> None:
         """Set the unlock duration from now."""

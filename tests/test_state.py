@@ -543,3 +543,101 @@ class TestRemoteStateLoadFailure:
         # Verify emergency_count was preserved
         assert state.emergency_count == 2
         assert state._state.get("last_emergency_wait") == 60
+
+
+class TestBlockedSites:
+    """Tests for centralized blocklist in state."""
+
+    def test_blocked_sites_none_initially(self, temp_state_file):
+        """blocked_sites should be None when not yet initialized."""
+        state = State(state_path=temp_state_file)
+        assert state.blocked_sites is None
+
+    def test_set_blocked_sites(self, temp_state_file):
+        """set_blocked_sites should store the list."""
+        state = State(state_path=temp_state_file)
+        sites = ["twitter.com", "reddit.com"]
+        state.set_blocked_sites(sites)
+        assert state.blocked_sites == ["twitter.com", "reddit.com"]
+
+    def test_set_blocked_sites_persists(self, temp_state_file):
+        """set_blocked_sites should persist to file."""
+        state = State(state_path=temp_state_file)
+        state.set_blocked_sites(["twitter.com"])
+
+        state2 = State(state_path=temp_state_file)
+        assert state2.blocked_sites == ["twitter.com"]
+
+    def test_add_blocked_site(self, temp_state_file):
+        """add_blocked_site should append to the list."""
+        state = State(state_path=temp_state_file)
+        state.set_blocked_sites(["twitter.com"])
+        state.add_blocked_site("reddit.com")
+        assert "reddit.com" in state.blocked_sites
+        assert len(state.blocked_sites) == 2
+
+    def test_add_blocked_site_no_duplicates(self, temp_state_file):
+        """add_blocked_site should not add duplicates."""
+        state = State(state_path=temp_state_file)
+        state.set_blocked_sites(["twitter.com"])
+        state.add_blocked_site("twitter.com")
+        assert len(state.blocked_sites) == 1
+
+    def test_add_blocked_site_initializes_empty_list(self, temp_state_file):
+        """add_blocked_site should work even when blocked_sites not set."""
+        state = State(state_path=temp_state_file)
+        state.add_blocked_site("twitter.com")
+        assert state.blocked_sites == ["twitter.com"]
+
+    def test_remove_blocked_site(self, temp_state_file):
+        """remove_blocked_site should remove from the list."""
+        state = State(state_path=temp_state_file)
+        state.set_blocked_sites(["twitter.com", "reddit.com"])
+        state.remove_blocked_site("twitter.com")
+        assert state.blocked_sites == ["reddit.com"]
+
+    def test_remove_blocked_site_not_present(self, temp_state_file):
+        """remove_blocked_site should be a no-op for missing sites."""
+        state = State(state_path=temp_state_file)
+        state.set_blocked_sites(["twitter.com"])
+        state.remove_blocked_site("reddit.com")
+        assert state.blocked_sites == ["twitter.com"]
+
+    def test_blocked_sites_preserved_across_day_reset(self, temp_state_file):
+        """blocked_sites should survive daily state reset."""
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        data = {
+            "date": yesterday,
+            "tz": "local",
+            "blocked": False,
+            "unlocked_until": time.time() + 3600,
+            "emergency_count": 2,
+            "last_emergency_wait": 60,
+            "blocked_sites": ["twitter.com", "reddit.com"],
+        }
+        temp_state_file.write_text(json.dumps(data))
+
+        state = State(state_path=temp_state_file)
+
+        # Day-specific state should reset
+        assert state.is_blocked is True
+        assert state.emergency_count == 0
+
+        # But blocked_sites should be preserved
+        assert state.blocked_sites == ["twitter.com", "reddit.com"]
+
+    def test_blocked_sites_none_not_preserved_across_day_reset(self, temp_state_file):
+        """When blocked_sites was never set, it should remain None after reset."""
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        data = {
+            "date": yesterday,
+            "tz": "local",
+            "blocked": True,
+            "unlocked_until": 0,
+            "emergency_count": 0,
+            "last_emergency_wait": 0,
+        }
+        temp_state_file.write_text(json.dumps(data))
+
+        state = State(state_path=temp_state_file)
+        assert state.blocked_sites is None

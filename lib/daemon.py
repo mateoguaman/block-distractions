@@ -59,6 +59,7 @@ class BlockDaemon:
         self.experiment = get_experiment_logger(self.config)
         self.poll_manager = get_poll_manager(self.config.phone_api_settings)
         self.running = False
+        self._last_blocked_state: bool | None = None
 
     def _note_info(self) -> dict[str, object]:
         """Collect metadata about today's daily note."""
@@ -147,6 +148,15 @@ class BlockDaemon:
         except Exception as e:
             logger.error(f"Error processing phone requests: {e}")
 
+    def _get_blocked_sites(self) -> list[str]:
+        """Get blocklist from remote state, seeding from config if needed."""
+        sites = self.state.blocked_sites
+        if sites is None:
+            sites = self.config.blocked_sites
+            self.state.set_blocked_sites(sites)
+            logger.info(f"Seeded remote blocklist from config: {len(sites)} sites")
+        return sites
+
     def evaluate_auto_unlock(self) -> tuple[bool, dict[str, object]]:
         """Check if auto-unlock should happen now, with context."""
         auto_settings = self.config.auto_unlock_settings
@@ -217,18 +227,12 @@ class BlockDaemon:
             self.state.load()
 
             pre_state = self._state_context()
-            pre_hosts_blocking = self.hosts.is_blocking_active()
-
-            # Always sync blocking state first
-            self.unlock_manager.sync_blocking_state()
 
             # Check if auto-unlock should happen
             should_unlock, auto_info = self.evaluate_auto_unlock()
             self.experiment.log_event(
                 "daemon_check",
                 note=self._note_info(),
-                hosts_blocking_before_sync=pre_hosts_blocking,
-                hosts_blocking_after_sync=self.hosts.is_blocking_active(),
                 auto_unlock=auto_info,
                 config={
                     "obsidian_vault_path": str(self.config.obsidian_vault_path),
@@ -252,28 +256,31 @@ class BlockDaemon:
                     success, msg = self.remote_sync.sync([])
                     if not success:
                         logger.error(f"Remote sync failed during auto-unlock: {msg}")
+                self._last_blocked_state = False
                 logger.info(f"Auto-unlocked for {duration} seconds")
                 action = "auto_unlock"
             else:
-                # Make sure blocking is in sync with state
-                if self.state.is_blocked:
-                    if not self.hosts.is_blocking_active():
-                        logger.info("Re-enabling blocking...")
-                        self.hosts.block_sites(self.config.blocked_sites)
+                # Sync remote DNS only on state transitions (not every cycle)
+                current_blocked = self.state.is_blocked
+                if self._last_blocked_state != current_blocked:
+                    if current_blocked:
+                        sites = self._get_blocked_sites()
+                        logger.info("Blocking state changed to BLOCKED, syncing...")
+                        self.hosts.block_sites(sites)
                         if self.remote_sync.enabled:
-                            success, msg = self.remote_sync.sync(self.config.blocked_sites)
+                            success, msg = self.remote_sync.sync(sites)
                             if not success:
                                 logger.error(f"Remote sync failed during re-block: {msg}")
-                        action = "reblock_hosts"
-                else:
-                    if self.hosts.is_blocking_active():
-                        logger.info("Removing blocks (unlocked)...")
+                        action = "reblock"
+                    else:
+                        logger.info("Blocking state changed to UNBLOCKED, syncing...")
                         self.hosts.unblock_sites()
                         if self.remote_sync.enabled:
                             success, msg = self.remote_sync.sync([])
                             if not success:
                                 logger.error(f"Remote sync failed during unblock: {msg}")
-                        action = "unblock_hosts"
+                        action = "unblock"
+                    self._last_blocked_state = current_blocked
 
             self.experiment.log_event(
                 "daemon_check_complete",

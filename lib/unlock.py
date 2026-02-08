@@ -76,6 +76,10 @@ class UnlockManager:
             )
         return self._conditions[condition_type]
 
+    def _get_blocked_sites(self) -> list[str]:
+        """Get the current blocklist from state (preferred) or config (fallback)."""
+        return self.state.blocked_sites or self.config.blocked_sites
+
     def _sync_remote(self) -> bool:
         """Sync blocking state to remote DNS server.
 
@@ -87,7 +91,7 @@ class UnlockManager:
 
         # When unblocked, sync empty list to remote; when blocked, sync full list
         if self.state.is_blocked:
-            success, message = self.remote_sync.sync(self.config.blocked_sites)
+            success, message = self.remote_sync.sync(self._get_blocked_sites())
         else:
             success, message = self.remote_sync.sync([])  # Unblock all on remote
 
@@ -243,14 +247,16 @@ class UnlockManager:
     def force_block(self) -> str:
         """Force sites to be blocked immediately."""
         self.state.force_block()
-        self.hosts.block_sites(self.config.blocked_sites)
+        sites = self._get_blocked_sites()
+        self.hosts.block_sites(sites)
         self._sync_remote()
         return "Sites are now blocked."
 
     def sync_blocking_state(self) -> None:
         """Sync hosts file and remote DNS with current state."""
         should_block = self.state.is_blocked
-        self.hosts.sync_with_config(self.config.blocked_sites, should_block)
+        sites = self._get_blocked_sites()
+        self.hosts.sync_with_config(sites, should_block)
         self._sync_remote()
 
     def get_status(self, use_cached_conditions: bool = True) -> dict[str, Any]:

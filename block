@@ -141,7 +141,8 @@ def cmd_on(args):
 def cmd_list(args):
     """List blocked sites."""
     config = get_config()
-    sites = config.blocked_sites
+    state = get_state(config)
+    sites = state.blocked_sites or config.blocked_sites
 
     print("\nBlocked sites:")
     for site in sorted(sites):
@@ -173,6 +174,7 @@ def cmd_add(args):
         return 1
 
     config = get_config()
+    state = get_state(config)
 
     # Normalize site (remove protocol, www, trailing slash)
     site = args.site.lower()
@@ -180,26 +182,30 @@ def cmd_add(args):
     site = site.replace("www.", "")
     site = site.rstrip("/")
 
-    config.add_blocked_site(site)
+    # Seed remote blocklist from config if not yet initialized
+    if state.blocked_sites is None:
+        state.set_blocked_sites(config.blocked_sites)
+
+    sites = state.blocked_sites
+    if site in sites:
+        print(f"Site '{site}' already in blocklist.")
+        return 0
+
+    state.add_blocked_site(site)
+    sites = state.blocked_sites
     print(f"Added '{site}' to blocklist.")
     experiment = get_experiment_logger(config)
     experiment.log_event(
         "blocklist_add",
         site=site,
-        blocked_sites_count=len(config.blocked_sites),
+        blocked_sites_count=len(sites),
     )
 
-    # Sync hosts file if blocking is active
-    state = get_state(config)
+    # Sync to remote DNS if blocking is active
     if state.is_blocked:
-        hosts = get_hosts_manager()
-        hosts.block_sites(config.blocked_sites)
-        print("Hosts file updated.")
-
-    # Sync to remote
-    remote_sync = get_remote_sync_manager(config.remote_sync_settings)
-    success, message = remote_sync.sync(config.blocked_sites)
-    print(f"Remote: {message}")
+        remote_sync = get_remote_sync_manager(config.remote_sync_settings)
+        success, message = remote_sync.sync(sites)
+        print(f"Remote: {message}")
 
 
 def cmd_remove(args):
@@ -209,35 +215,34 @@ def cmd_remove(args):
         return 1
 
     config = get_config()
+    state = get_state(config)
 
     site = args.site.lower()
     site = site.replace("https://", "").replace("http://", "")
     site = site.replace("www.", "")
     site = site.rstrip("/")
 
-    if site not in config.blocked_sites:
+    # Seed remote blocklist from config if not yet initialized
+    if state.blocked_sites is None:
+        state.set_blocked_sites(config.blocked_sites)
+
+    if site not in state.blocked_sites:
         print(f"Site '{site}' not in blocklist.")
         return 1
 
-    config.remove_blocked_site(site)
+    state.remove_blocked_site(site)
+    sites = state.blocked_sites
     print(f"Removed '{site}' from blocklist.")
     experiment = get_experiment_logger(config)
     experiment.log_event(
         "blocklist_remove",
         site=site,
-        blocked_sites_count=len(config.blocked_sites),
+        blocked_sites_count=len(sites),
     )
 
-    # Sync hosts file
-    state = get_state(config)
-    if state.is_blocked:
-        hosts = get_hosts_manager()
-        hosts.block_sites(config.blocked_sites)
-        print("Hosts file updated.")
-
-    # Sync to remote
+    # Sync to remote DNS
     remote_sync = get_remote_sync_manager(config.remote_sync_settings)
-    success, message = remote_sync.sync(config.blocked_sites)
+    success, message = remote_sync.sync(sites)
     print(f"Remote: {message}")
 
 

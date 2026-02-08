@@ -430,8 +430,8 @@ class TestRunCheck:
     """Tests for run_check method."""
 
     @freeze_time("2026-01-06 18:00:00")
-    def test_syncs_blocking_state_on_each_check(self, temp_state_file, mock_config):
-        """run_check should sync blocking state on each iteration."""
+    def test_syncs_on_first_check_when_blocked(self, temp_state_file, mock_config):
+        """run_check should sync blocking state on first check (state transition from None)."""
         from lib.daemon import BlockDaemon
         from lib.state import State
 
@@ -451,7 +451,7 @@ class TestRunCheck:
             mock_get_state.return_value = state
 
             mock_hosts = MagicMock()
-            mock_hosts.is_blocking_active.return_value = True
+            mock_hosts.is_blocking_active.return_value = False
             mock_get_hosts.return_value = mock_hosts
 
             mock_get_obsidian.return_value = MagicMock()
@@ -459,14 +459,59 @@ class TestRunCheck:
             mock_get_remote_sync.return_value = mock_remote_sync
 
             daemon = BlockDaemon()
+            assert daemon._last_blocked_state is None
+
             daemon.run_check()
 
-            # Should have synced state
-            mock_hosts.sync_with_config.assert_called()
+            # Should have synced on first check (transition from None to blocked)
+            mock_hosts.block_sites.assert_called_once()
+            assert daemon._last_blocked_state is True
+
+    @freeze_time("2026-01-06 18:00:00")
+    def test_no_redundant_sync_when_state_unchanged(self, temp_state_file, mock_config):
+        """run_check should NOT re-sync when blocking state hasn't changed."""
+        from lib.daemon import BlockDaemon
+        from lib.state import State
+
+        mock_config.auto_unlock_settings = {
+            "enabled": False,
+            "check_interval": 300,
+        }
+
+        with patch("lib.daemon.get_config", return_value=mock_config), \
+             patch("lib.daemon.get_state") as mock_get_state, \
+             patch("lib.daemon.get_hosts_manager") as mock_get_hosts, \
+             patch("lib.daemon.get_obsidian_parser") as mock_get_obsidian, \
+             patch("lib.daemon.get_remote_sync_manager") as mock_get_remote_sync, \
+             patch("lib.daemon.get_experiment_logger"):
+
+            state = State(state_path=temp_state_file)
+            mock_get_state.return_value = state
+
+            mock_hosts = MagicMock()
+            mock_hosts.is_blocking_active.return_value = False
+            mock_get_hosts.return_value = mock_hosts
+
+            mock_get_obsidian.return_value = MagicMock()
+            mock_remote_sync = MagicMock(enabled=True)
+            mock_remote_sync.sync.return_value = (True, "OK")
+            mock_get_remote_sync.return_value = mock_remote_sync
+
+            daemon = BlockDaemon()
+
+            # First check: syncs (transition from None to blocked)
+            daemon.run_check()
+            assert mock_hosts.block_sites.call_count == 1
+            assert mock_remote_sync.sync.call_count == 1
+
+            # Second check: should NOT re-sync (state still blocked)
+            daemon.run_check()
+            assert mock_hosts.block_sites.call_count == 1  # Still 1, not 2
+            assert mock_remote_sync.sync.call_count == 1  # Still 1, not 2
 
     @freeze_time("2026-01-06 18:00:00")
     def test_re_enables_blocking_when_state_is_blocked(self, temp_state_file, mock_config):
-        """Should re-enable blocking when state says blocked but hosts not blocking."""
+        """Should enable blocking on first check when state says blocked."""
         from lib.daemon import BlockDaemon
         from lib.state import State
 
@@ -510,7 +555,7 @@ class TestRunCheck:
             daemon = BlockDaemon()
             daemon.run_check()
 
-            # Should have re-enabled blocking because state.is_blocked and hosts not blocking
+            # Should have enabled blocking on first check (state transition)
             mock_hosts.block_sites.assert_called_once_with(mock_config.blocked_sites)
 
 
